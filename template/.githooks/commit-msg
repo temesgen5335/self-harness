@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Enforce Conventional Commits and forbid AI attribution. Installed via core.hooksPath=.githooks
+set -euo pipefail
+msg_file="$1"
+subject="$(grep -v '^#' "$msg_file" | sed -n '1p')"
+
+# Let git-generated messages through.
+if [[ "$subject" =~ ^(Merge|Revert\ \"|fixup!|squash!|amend!) ]]; then exit 0; fi
+
+re='^(feat|fix|perf|revert|refactor|test|docs|build|ci|chore|style)(\([a-z0-9._/-]+\))?!?: [^A-Z].{0,70}[^.]$'
+if ! [[ "$subject" =~ $re ]]; then
+  cat >&2 << MSG
+commit-msg: subject must be Conventional Commits, <=72 chars, lower-case start, no trailing period.
+  got: $subject
+  e.g. feat(api): add cursor pagination to /jobs
+MSG
+  exit 1
+fi
+if (( ${#subject} > 72 )); then echo "commit-msg: subject is ${#subject} chars (max 72)" >&2; exit 1; fi
+
+if grep -Eiq '(co-authored-by:.*(claude|anthropic|copilot|chatgpt|openai|cursor|gemini))|generated (with|by) (claude|ai|chatgpt|copilot)|🤖' "$msg_file"; then
+  echo "commit-msg: AI attribution is not allowed in commit messages." >&2; exit 1
+fi
+if grep -q '!:' <<< "$subject" && ! grep -q '^BREAKING CHANGE: ' "$msg_file"; then
+  echo "commit-msg: '!' requires a 'BREAKING CHANGE: <migration notes>' footer." >&2; exit 1
+fi
+exit 0

@@ -1,0 +1,11 @@
+# Paths owned by the harness in local mode (relative to the repo root).
+# Used by install.sh (.git/info/exclude block), wf-new.sh (copy into new worktrees) and uninstall.sh.
+# A trailing / marks a directory; * globs.
+.claude/harness/
+.claude/hooks/guard-git.sh
+.claude/hooks/guard_git.py
+.claude/hooks/session-context.sh
+.claude/skills/wf-*/
+.claude/agents/wf-*.md
+.claude/settings.local.json
+.work

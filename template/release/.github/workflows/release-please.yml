@@ -1,0 +1,18 @@
+name: release-please
+on:
+  push:
+    branches: [__DEFAULT_BRANCH__]
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      # Pin to a full commit SHA of a release you have reviewed (supply-chain hygiene).
+      - uses: googleapis/release-please-action@v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          # Use a PAT or GitHub App token if release PRs must trigger CI workflows.
+          token: ${{ secrets.GITHUB_TOKEN }}

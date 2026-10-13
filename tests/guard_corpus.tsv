@@ -1,0 +1,87 @@
+# expected decision (standard profile) <TAB> command
+allow	git status
+allow	git diff --staged
+allow	git log --oneline -5
+allow	git show HEAD
+allow	git branch --show-current
+allow	git tag
+allow	git tag -l 'v*'
+allow	git fetch origin
+allow	git stash
+ask	git reset HEAD src/app.py
+allow	echo "git commit is drafted in commit-drafts.md"
+allow	grep -rn "git push" docs/
+allow	gh pr list
+allow	gh pr view 12
+allow	gh api repos/o/r/pulls
+allow	ls .git/hooks
+allow	python3 -c 'print(1)'
+ask	git add src/app.py
+ask	git stage -p
+ask	git rm --cached secrets.env
+ask	git reset src/app.py
+ask	git restore --staged src/app.py
+ask	git commit -m "fix: x"
+ask	cd sub && git commit -m "fix: x"
+ask	git -C ../repo commit -m x
+ask	git -c user.name=x commit -m x
+ask	git --git-dir=.git commit -m x
+ask	git --no-pager commit -m x
+ask	/usr/bin/git commit -m x
+ask	command git commit -m x
+ask	env GIT_AUTHOR_NAME=x git commit -m x
+ask	GIT_DIR=.git git commit -m x
+ask	bash -c "git commit -m x"
+ask	sh -c 'git push'
+ask	zsh -c "cd a; git add ."
+ask	echo $(git commit -m x)
+ask	echo "$(git commit -m x)"
+ask	echo `git commit -m x`
+ask	eval git push
+ask	true; git push origin main
+ask	git push
+ask	git cherry-pick abc123
+ask	git revert HEAD
+ask	gh pr create --fill
+ask	gh pr comment 3 -b hi
+ask	gh api -X POST repos/o/r/issues
+block	git commit --amend --no-edit
+block	git commit --no-verify -m x
+block	git commit -n -m x
+block	git push --force
+block	git push -f origin main
+block	git push --force-with-lease
+block	git push origin +main
+block	git push origin :old-branch
+block	git push --delete origin old
+block	git merge feature
+block	git pull
+block	git rebase -i main
+block	git tag v1.0.0
+block	git tag -a v1 -m x
+block	git reset --hard
+block	git reset --hard origin/main
+block	git reset --soft HEAD~1
+block	git reset HEAD~2
+block	git clean -fd
+block	git clean -xdf
+block	git checkout -- .
+block	git checkout .
+block	git restore .
+block	git restore src/app.py
+block	git switch --discard-changes main
+block	git stash drop
+block	git stash clear
+block	git branch -D feature
+block	git branch -f main HEAD~1
+block	git worktree remove ../x
+block	git update-ref -d refs/heads/x
+block	git filter-branch --tree-filter x
+block	git reflog expire --expire=now --all
+block	git gc --prune=now
+block	git -c core.hooksPath=/dev/null commit -m x
+block	git config core.hooksPath /dev/null
+block	gh pr merge 3 --squash
+block	gh release create v1
+block	bash -c "git push --force"
+block	echo "unterminated

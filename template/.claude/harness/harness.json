@@ -1,0 +1,29 @@
+{
+  "profile": "standard",
+  "work_dir": ".work",
+  "default_branch": "main",
+  "team": {
+    "lead": { "name": "", "email": "" },
+    "collaborators": []
+  },
+  "commands": {
+    "install": "",
+    "lint": "",
+    "typecheck": "",
+    "test": "",
+    "stress": "",
+    "build": ""
+  },
+  "git": {
+    "guard": "enforce",
+    "ops": { "stage": "ask", "commit": "ask", "push": "ask", "pr": "ask" }
+  },
+  "gate": {
+    "mode": "enforce",
+    "critical_paths": ["**/auth/**", "**/payments/**", "**/migrations/**", "**/security/**"]
+  },
+  "review": {
+    "lenses": ["correctness", "security", "scale", "operability", "design", "experience"],
+    "adversary": true
+  }
+}
