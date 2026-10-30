@@ -7,8 +7,8 @@
 #                                     worktrees in the git dir, CLAUDE.md/AGENTS.md/.gitignore untouched.
 #                                     Fixed at first install; switch by running uninstall.sh first.
 #   --profile strict|standard|light   initial profile (edit harness.json later)
-#   --preset <name>                   merge presets/<name>.json into harness.json (e.g. tenacious); its
-#                                     _install options set defaults such as --no-release
+#   --preset <name>                   merge presets/<name>.json into harness.json once (e.g. tenacious),
+#                                     recorded as "preset"; its _install options set defaults such as --no-release
 #   --lead "Name <email>"             team lead (default: git user.name/user.email of whoever runs this)
 #   --collaborator "Name <email>"     add a collaborator (repeatable)
 #   --default-branch <name>           default: origin/HEAD, else current branch, else main
@@ -90,9 +90,20 @@ def merge(base, over):
     for k, v in over.items():
         base[k] = merge(base.get(k, {}), v) if isinstance(v, dict) and isinstance(base.get(k), dict) else v
     return base
+def leaves(d, pre=""):
+    for k, v in d.items():
+        yield from leaves(v, f"{pre}{k}.") if isinstance(v, dict) else [(f"{pre}{k}", v)]
 if preset_file:
-    pre = {k: v for k, v in json.load(open(preset_file)).items() if not k.startswith("_")}
-    merge(c, pre); changed.append(f"preset={preset_file.rsplit('/', 1)[-1][:-5]}")
+    name = preset_file.rsplit("/", 1)[-1][:-5]
+    if c.get("preset") == name:
+        # Applied once; re-applying would overwrite whatever the project has changed since.
+        changed.append(f"preset {name} already applied, not re-applied (edit harness.json)")
+    else:
+        pre = {k: v for k, v in json.load(open(preset_file)).items() if not k.startswith("_")}
+        before = dict(leaves(c))
+        merge(c, pre); c["preset"] = name
+        diff = [k for k, v in leaves(pre) if before.get(k) != v]
+        changed.append(f"preset={name} (set {', '.join(diff) or 'nothing new'})")
 if c.get("mode") != mode: c["mode"] = mode; changed.append(f"mode={mode}")
 if branch: c["default_branch"] = branch; changed.append(f"default_branch={branch}")
 if profile:
@@ -233,7 +244,7 @@ echo
 echo "Installed harness $(cat .claude/harness/VERSION) in $mode mode · effective config: python3 .claude/harness/scripts/hconfig.py"
 if [[ -n "$preset_file" ]]; then
   while IFS= read -r p; do
-    [[ -e "$p" ]] || echo "WARNING: preset '$preset' expects $p, which this repo lacks; adopt the project template or edit harness.json."
+    [[ -z "$p" || -e "$p" ]] || echo "WARNING: preset '$preset' expects $p, which this repo lacks; adopt the project template or edit harness.json."
   done < <(python3 -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1])).get("_install",{}).get("expects",[])))' "$preset_file")
 fi
 echo "Next:"

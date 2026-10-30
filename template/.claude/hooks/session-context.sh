@@ -21,7 +21,8 @@ nxt = {"new": "/wf-investigate", "investigated": "/wf-spec (fresh session)",
        "building": "/wf-build (next task) or /wf-commit", "built": "/wf-review (fresh session)",
        "reviewed": "/wf-fix in build session, or done if gate PASS", "fixing": "/wf-fix, then /wf-commit",
        "passed": "/wf-pr drafts the PR; /wf-validate before promotion; after merge /wf-release",
-       "validated": "/wf-pr, or promote", "released": "nothing"}
+       "validated": "/wf-pr, or promote", "validation-hold": "/wf-fix the validation defects, then /wf-validate",
+       "released": "nothing"}
 for sp in (root / wd).glob("*/state.json"):
     s = json.loads(sp.read_text())
     if s.get("branch") != branch:

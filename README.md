@@ -114,8 +114,9 @@ Trade-offs of local mode:
 
 ## Presets: a company's conventions in one flag
 
-`install.sh <repo> --preset <name>` merges `presets/<name>.json` into `harness.json` (re-run to re-apply; your
-other keys are kept). Presets set conventions; profiles still set strictness.
+`install.sh <repo> --preset <name>` merges `presets/<name>.json` into `harness.json` once and records it as
+`"preset"`; re-running the installer never re-applies it over your later edits. Presets set conventions;
+profiles still set strictness.
 
 `--preset tenacious` follows the [Tenacious engineering standards](https://tenacious-engineering-standards.pages.dev/):
 

@@ -9,7 +9,8 @@ installs the harness, commits the fixture and then the change, writes an approve
 `claude -p "/wf-review <case>"` and scores the round it wrote:
   caught   a finding names the defect's file (when given) and one of its keywords
   lens     that finding came from one of the defect's expected lenses
-  blocked  the gate did not pass (expected for every seeded case; a control should pass)
+  blocked  the gate returned BLOCK or ESCALATE (expected for every seeded case; a control should pass);
+           gate errors (no round written, malformed findings, config) are counted separately
 --runs N > 1 repeats each case (G2 consistency): how often the defect is caught, verdict agreement and the
 spread of the matched finding's exposure. Results go to evals/results/<utc time>.json.
 
@@ -104,25 +105,30 @@ def review(repo: pathlib.Path, name: str, model: str | None) -> dict:
     if model:
         cmd += ["--model", model]
     t0 = time.time()
-    r = run(cmd, repo, check=False, timeout=3600)
     try:
-        out = json.loads(r.stdout)
+        r = run(cmd, repo, check=False, timeout=3600)
+        code, stdout = r.returncode, r.stdout
+    except subprocess.TimeoutExpired:
+        code, stdout = "timeout", ""
+    try:
+        out = json.loads(stdout)
     except ValueError:
         out = {}
     rounds = sorted((repo / ".work" / name / "40-reviews").glob("R*.findings.json"))
     data = json.loads(rounds[-1].read_text()) if rounds else None
     gate = run(["python3", ".claude/harness/scripts/gate.py", name, "--no-write"], repo, check=False)
-    return {"exit": r.returncode, "minutes": round((time.time() - t0) / 60, 1), "cost_usd": out.get("total_cost_usd"),
+    return {"exit": code, "minutes": round((time.time() - t0) / 60, 1), "cost_usd": out.get("total_cost_usd"),
             "turns": out.get("num_turns"), "wrote_round": data is not None,
             "findings": (data or {}).get("findings", []), "gate_exit": gate.returncode}
 
 
 def summarise(name: str, case: dict, runs: list) -> dict:
     n = len(runs)
-    verdicts = ["pass" if r["gate_exit"] == 0 else "block" for r in runs]
+    # gate exits: 0 pass, 1 block, 2 escalate (a block too); anything else is an error, not a verdict.
+    verdicts = [{0: "pass", 1: "block", 2: "block"}.get(r["gate_exit"], "error") for r in runs]
     s = {"case": name, "seeded": case["defect"] is not None, "runs": n,
          "wrote_round": sum(r["wrote_round"] for r in runs),
-         "blocked": verdicts.count("block"),
+         "blocked": verdicts.count("block"), "gate_errors": verdicts.count("error"),
          "verdict_agreement": max(verdicts.count("pass"), verdicts.count("block")) / n,
          "findings_per_run": [len(r["findings"]) for r in runs],
          "cost_usd": round(sum(r["cost_usd"] or 0 for r in runs), 2)}

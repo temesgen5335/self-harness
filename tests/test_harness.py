@@ -366,6 +366,26 @@ class TestGate(Base):
                 self.assertIn("lite track upgraded to standard", out)
                 self.assertIn("lenses not run", out)
 
+    def test_lite_track_upgrades_when_a_file_moves_out_of_a_critical_path(self):
+        (self.repo / "src/auth").mkdir(parents=True)
+        (self.repo / "src/auth/tokens.py").write_text("".join(f"x{i} = {i}\n" for i in range(30)))
+        commit_all(self.repo, "feat: tokens")
+        self.head = run(["git", "rev-parse", "HEAD"], self.repo).stdout.strip()
+        (self.repo / "src/auth/tokens.py").rename(self.repo / "src/tokens.py")
+        with open(self.repo / "src/tokens.py", "a") as fh:
+            fh.write("skip_check = True\n")
+        self.lite({})
+        self.assertIn("touches critical path(s): src/auth/tokens.py", self.gate()[1])
+
+    def test_lite_track_fails_closed_on_a_missing_or_bogus_base(self):
+        self.lite({"src/util.py": "x = 1\n"})
+        for state in ({"track": "lite"}, {"track": "lite", "base": "deadbeef"}):
+            with self.subTest(state):
+                (self.repo / ".work/x/state.json").write_text(json.dumps(state))
+                code, out = self.gate()
+                self.assertEqual(code, 1, out)
+                self.assertIn("is not an ancestor", out)
+
     def test_unknown_profile_is_config_error(self):
         set_cfg(self.repo, profile="yolo")
         self.assertEqual(self.gate()[0], 3)
@@ -474,7 +494,7 @@ import json, os, pathlib, subprocess, sys
 slug = sys.argv[sys.argv.index("-p") + 1].split()[1]
 head = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
 cfg = json.loads(pathlib.Path(".claude/harness/harness.json").read_text())
-finding = {"id": "F-001", "title": os.environ["FAKE_TITLE"], "lens": "security", "class": "security",
+finding = {"id": "F-001", "title": os.environ["FAKE_TITLE"], "lens": "security", "class": "security-exploitable",
            "status": "open", "p_trigger": 0.8, "p_visible": 0.5, "evidence": "executed-repro",
            "files": [os.environ["FAKE_FILE"] + ":3"]}
 rdir = pathlib.Path(f".work/{slug}/40-reviews"); rdir.mkdir(parents=True, exist_ok=True)
@@ -503,8 +523,23 @@ class TestEvals(Base):
 
     def test_scores_a_caught_defect(self):
         s = self.evaluate("SQL injection in find_user", "app/users.py")
-        self.assertEqual((s["caught"], s["right_lens"], s["blocked"], s["runs"]), (2, 2, 2, 2))
+        self.assertEqual((s["caught"], s["right_lens"], s["blocked"], s["gate_errors"], s["runs"]), (2, 2, 2, 0, 2))
         self.assertEqual((s["verdict_agreement"], s["exposure_range"], s["cost_usd"]), (1.0, [0.4, 0.4], 1.0))
+
+    def test_a_review_timeout_is_recorded_not_raised(self):
+        import importlib.util
+        from unittest import mock
+        spec = importlib.util.spec_from_file_location("run_evals", self.RUNNER)
+        mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+        repo = make_repo(self.tmp)
+        real = mod.run
+        def fake(cmd, cwd, check=True, **kw):
+            if cmd[0] == "claude":
+                raise subprocess.TimeoutExpired(cmd, 1)
+            return real(cmd, cwd, check=check, **kw)
+        with mock.patch.object(mod, "run", fake):
+            r = mod.review(repo, "x", None)
+        self.assertEqual((r["exit"], r["wrote_round"]), ("timeout", False))
 
     def test_keyword_on_the_wrong_file_is_not_a_catch(self):
         s = self.evaluate("SQL injection risk", "app/db.py")
@@ -527,6 +562,14 @@ class TestPreset(Base):
         r = run([".claude/harness/scripts/wf-new.sh", "tidy", "tidy up", "--type", "chore", "--here"], repo)
         self.assertIn("no --ticket", r.stderr)
         self.assertEqual(run(["git", "branch", "--show-current"], repo).stdout.strip(), "chore/tidy")
+
+    def test_rerunning_the_installer_keeps_edits_made_after_the_preset(self):
+        repo = make_repo(self.tmp, "proj", "--preset", "tenacious", "--mode", "local")
+        set_cfg(repo, commands__lint="npm run lint")
+        r = run(["bash", str(HARNESS / "install.sh"), str(repo), "--preset", "tenacious"], repo)
+        self.assertIn("already applied", r.stdout)
+        cfg = json.loads(run(["python3", ".claude/harness/scripts/hconfig.py"], repo).stdout)
+        self.assertEqual(cfg["commands"]["lint"], "npm run lint")
 
     def test_bad_type_ticket_and_preset_are_refused(self):
         repo = make_repo(self.tmp)

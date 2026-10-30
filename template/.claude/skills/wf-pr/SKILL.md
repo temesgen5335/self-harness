@@ -13,7 +13,8 @@ Config: !`python3 .claude/harness/scripts/hconfig.py docs`
 1. Slug from `$ARGUMENTS` or the branch's state.json. `python3 .claude/harness/scripts/gate.py <slug> --no-write`
    must PASS for this head; otherwise name the blocking findings and stop.
 2. No uncommitted code (`git status --porcelain`, ignoring the work dir).
-3. Base = harness.json `branching.base`, else `default_branch`. Diff size: `git diff --shortstat <base>...HEAD`;
+3. Base = harness.json `branching.base`, else `default_branch`. Diff size: `git diff --shortstat origin/<base>...HEAD`
+   (the local `<base>` only when there is no remote);
    over ~400 changed lines, say so and suggest how to split.
 
 ## Draft

@@ -37,24 +37,24 @@ wait_for_clean_tree() {
     read -r ans; [[ "$ans" == "q" ]] && exit 1
   done
 }
-tools() { python3 "$H/hconfig.py" "$1" | python3 -c 'import json,sys; print(",".join(json.load(sys.stdin)))'; }
-# Run a headless session; record its metrics and print its result text.
+tools() { python3 "$H/hconfig.py" "$1" | python3 -c 'import json,sys; print(",".join(t for t in json.load(sys.stdin) if t))'; }
+# Run a headless session for review round <round>; record its metrics and print its result text.
 session() {
-  local phase="$1"; shift
-  claude -p "$@" --output-format json | python3 "$H/wf-metrics.py" "$slug" record "$phase" "$i"
+  local phase="$1" rnd="$2"; shift 2
+  claude -p "$@" --output-format json | python3 "$H/wf-metrics.py" "$slug" record "$phase" "$rnd"
 }
 # Count of review rounds. Not `ls | wc`: with pipefail, ls on an empty glob would end the script.
 latest_review() { local f=("$work"/40-reviews/R*.findings.json); [[ -e "${f[0]}" ]] && echo "${#f[@]}" || echo 0; }
 
 # Reviewer: may write only under the work dir. Bash is broad, so the loop also verifies nothing else changed.
-REVIEW_TOOLS="$(tools loop.review_tools),Write(${work}/**),Edit(${work}/**)"
+REVIEW_TOOLS="$(tools loop.review_tools)"; REVIEW_TOOLS="${REVIEW_TOOLS:+$REVIEW_TOOLS,}Write(${work}/**),Edit(${work}/**)"
 FIX_TOOLS="$(tools loop.fix_tools)"
 
 for ((i = 1; i <= max; i++)); do
   wait_for_clean_tree
   before="$(latest_review)"
   echo "== Round: fresh review session =="
-  session review "/wf-review $slug" --allowedTools "$REVIEW_TOOLS" || echo "review session exited non-zero"
+  session review "$((before + 1))" "/wf-review $slug" --allowedTools "$REVIEW_TOOLS" || echo "review session exited non-zero"
   if [[ -n "$(code_status)" ]]; then
     echo "STOP — the review session changed files outside $wd/ (reviewers must not edit code):"; code_status; exit 4
   fi
@@ -73,9 +73,9 @@ for ((i = 1; i <= max; i++)); do
   fi
   echo "== Fix session =="
   if [[ -n "$fix_sid" ]]; then
-    session fix "/wf-fix $slug" --resume "$fix_sid" --allowedTools "$FIX_TOOLS" --permission-mode acceptEdits
+    session fix "$(latest_review)" "/wf-fix $slug" --resume "$fix_sid" --allowedTools "$FIX_TOOLS" --permission-mode acceptEdits
   else
-    session fix "/wf-fix $slug" --allowedTools "$FIX_TOOLS" --permission-mode acceptEdits
+    session fix "$(latest_review)" "/wf-fix $slug" --allowedTools "$FIX_TOOLS" --permission-mode acceptEdits
   fi
 done
 python3 "$H/wf-metrics.py" "$slug" summary

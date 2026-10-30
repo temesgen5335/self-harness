@@ -31,6 +31,7 @@ You record only what you observed in this session or what a person reports to yo
 6. For each failure write a defect: TC id, steps to reproduce, expected vs actual, severity.
 7. Recommendation: `go`, `hold` (with the blocking defects) or `go with accepted risk` (which risk, who
    accepted it). Only a maintainer accepts risk.
-8. `python3 .claude/harness/scripts/wf-state.py <slug> set phase=validated validation=<go|hold|go-with-risk>`.
+8. go or go with accepted risk: `python3 .claude/harness/scripts/wf-state.py <slug> set phase=validated validation=<go|go-with-risk>`.
+   hold: `wf-state.py <slug> set phase=validation-hold validation=hold`; the defects go back to `/wf-fix`.
 
 Finish with the result table (TC, AC, result, evidence) and the recommendation. `/wf-pr` adds it to the PR's Testing section.

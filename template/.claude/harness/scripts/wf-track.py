@@ -20,8 +20,21 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from hconfig import ConfigError, load  # noqa: E402
 
 
-def git(root: pathlib.Path, *args: str) -> str:
-    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=False).stdout
+def git(root: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=False)
+
+
+def diff_bases(root: pathlib.Path, cfg: dict, state_base: str, head: str) -> list:
+    """Every base the change is measured from: state.json's base (which the work dir can edit) and the
+    merge-base with the configured base branch, so an edited base cannot shrink the diff."""
+    bases = [state_base] if state_base else []
+    branch = cfg.get("branching", {}).get("base") or cfg["default_branch"]
+    for ref in (f"origin/{branch}", branch):
+        mb = git(root, "merge-base", ref, head)
+        if mb.returncode == 0 and mb.stdout.strip():
+            bases.append(mb.stdout.strip())
+            break
+    return bases
 
 
 def matches(path: str, patterns: list[str]) -> bool:
@@ -37,25 +50,32 @@ def plan(root: pathlib.Path, cfg: dict, slug: str, head: str = "HEAD") -> dict:
     lite = cfg.get("tracks", {}).get("lite")
     if requested != "lite" or not lite:
         return full
-    base = state.get("base", "")
     reasons = []
-    if base:
-        work_dir = cfg["work_dir"]
-        numstat = git(root, "diff", "--numstat", f"{base}...{head}", "--", ".", f":(exclude){work_dir}")
-        changed, files = 0, []
-        for line in numstat.splitlines():
+    state_base = state.get("base", "")
+    if not state_base or git(root, "merge-base", "--is-ancestor", state_base, head).returncode != 0:
+        reasons.append(f"base {state_base or '(missing)'} is not an ancestor of {head}")
+    changed, files = 0, set()
+    for base in diff_bases(root, cfg, state_base, head):
+        # --no-renames: a move lists both paths, so moving a file out of auth/ still touches auth/.
+        r = git(root, "diff", "--no-renames", "--numstat", f"{base}...{head}", "--", ".", f":(exclude){cfg['work_dir']}")
+        if r.returncode != 0:
+            continue
+        n = 0
+        for line in r.stdout.splitlines():
             parts = line.split("\t")
             if len(parts) == 3:
-                files.append(parts[2])
-                changed += sum(int(x) for x in parts[:2] if x.isdigit())
-        if changed > int(lite["max_changed_lines"]):
-            reasons.append(f"{changed} changed lines > lite limit {lite['max_changed_lines']}")
-        crit = [f for f in files if matches(f, cfg["gate"]["critical_paths"])]
-        if crit:
-            reasons.append(f"touches critical path(s): {', '.join(crit[:3])}")
-        deps = [f for f in files if matches(f, lite.get("upgrade_paths", []))]
-        if deps:
-            reasons.append(f"touches dependencies or migrations: {', '.join(deps[:3])}")
+                files.add(parts[2])
+                n += sum(int(x) for x in parts[:2] if x.isdigit())
+        changed = max(changed, n)
+    files = sorted(files)
+    if changed > int(lite["max_changed_lines"]):
+        reasons.append(f"{changed} changed lines > lite limit {lite['max_changed_lines']}")
+    crit = [f for f in files if matches(f, cfg["gate"]["critical_paths"])]
+    if crit:
+        reasons.append(f"touches critical path(s): {', '.join(crit[:3])}")
+    deps = [f for f in files if matches(f, lite.get("upgrade_paths", []))]
+    if deps:
+        reasons.append(f"touches dependencies or migrations: {', '.join(deps[:3])}")
     if reasons:
         full["reasons"] = ["lite track upgraded to standard: " + r for r in reasons]
         return full
