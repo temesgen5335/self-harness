@@ -69,6 +69,8 @@ Set `"profile"` in `harness.json`. A profile only sets defaults; any key you set
 |---|---|---|---|
 | Stage / commit / push / open PR | block (draft only) | **ask**: maintainer confirms each command | ask |
 | Merge, tag, release, history rewrite, destructive, `--no-verify` | block | block | block |
+| Read a secret file (`.env`, keys), pipe a download into a shell | block | **ask** | ask |
+| Recursive delete (`rm -r`, `find -delete`) | ask | ask | ask |
 | Gate mode | enforce | enforce | **advisory** (reports, doesn't stop) |
 | Thresholds (default / critical) | 3% / 0.5% | 5% / 1% | 5% / 1% |
 | Stale review, dirty tree | block | block | warn |
@@ -77,7 +79,9 @@ Set `"profile"` in `harness.json`. A profile only sets defaults; any key you set
 Fine-tuning:
 - `git.guard`: `enforce` / `warn` / `off`.
 - `git.ops.<op>`: `allow` / `ask` / `block`, for each of `stage`, `commit`, `push`, `pr`, `merge`, `tag`, `release`,
-  `history`, `destructive` and `skip_hooks`.
+  `history`, `destructive` and `skip_hooks`, plus three non-git ops: `destructive_fs` (recursive deletes),
+  `secrets` (reading `.env`, private keys and credential files, through Bash or the Read tool) and
+  `remote_exec` (piping a downloaded script into a shell or interpreter).
 - `gate.mode`: `enforce` / `advisory` / `off`.
 - `gate.checks_required`, `gate.stale_review`, `gate.dirty_tree`, `gate.security_always_blocks`, thresholds and
   `critical_paths`.
@@ -231,8 +235,11 @@ the commit-msg hook, `wf-new.sh`, and local mode (no trace, shared worktree arti
 
 ## Limits worth knowing
 
-- The git guard is a guardrail, not a sandbox. It parses shell commands (including `bash -c`, `$(…)`, `eval` and git global
-  options), but a determined process can still write to `.git` directly. Use Claude Code's sandbox for hard isolation.
+- The guard is a guardrail, not a sandbox. It parses shell commands (including `bash -c`, `$(…)`, `eval`, git global
+  options and git calls written inside `python -c` / `node -e` code), but a determined process - a script file, an
+  alias, writing to `.git` directly - can still get around it. For hard isolation, enable Claude Code's sandbox
+  (filesystem and network restrictions enforced by the OS), especially with the `strict` profile.
+- The guard does not scan file contents for secrets. Pair it with a secret scanner in your git hooks or CI.
 - Headless loop runs give the fix session Bash; the guard still applies. To be stricter, narrow `FIX_TOOLS` in `wf-loop.sh`.
 - Review cost grows with the number of lenses. For small changes use the `light` profile or trim `review.lenses`.
 - Monorepos: add packages to `release-please-config.json` `packages` and set `include-component-in-tag: true`.

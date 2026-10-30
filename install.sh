@@ -102,8 +102,14 @@ dst["attribution"] = src["attribution"]
 hooks = dst.setdefault("hooks", {})
 for event, entries in src["hooks"].items():
     cur = hooks.setdefault(event, [])
-    have = {h.get("command") for e in cur for h in e.get("hooks", [])}
-    cur += [e for e in entries if not any(h.get("command") in have for h in e["hooks"])]
+    for e in entries:
+        cmds = {h.get("command") for h in e["hooks"]}
+        mine = [c for c in cur if cmds & {h.get("command") for h in c.get("hooks", [])}]
+        if not mine:
+            cur.append(e)
+        elif "matcher" in e:
+            for c in mine:  # an upgrade may widen what a harness hook covers (e.g. Bash -> Bash|Read)
+                c["matcher"] = e["matcher"]
 os.makedirs(".claude", exist_ok=True)
 open(dst_p, "w").write(json.dumps(dst, indent=2) + "\n")
 print("  merged", dst_p)

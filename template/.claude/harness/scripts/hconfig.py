@@ -18,7 +18,9 @@ import subprocess
 import sys
 
 ALLOW, ASK, BLOCK = "allow", "ask", "block"
-GIT_OPS = ("stage", "commit", "push", "pr", "merge", "tag", "release", "history", "destructive", "skip_hooks")
+GIT_OPS = ("stage", "commit", "push", "pr", "merge", "tag", "release", "history", "destructive", "skip_hooks",
+           # beyond git: recursive deletes, reading secret files, piping downloads into a shell
+           "destructive_fs", "secrets", "remote_exec")
 
 BASE = {
     "profile": "standard",
@@ -31,7 +33,8 @@ BASE = {
         "guard": "enforce",              # enforce | warn | off
         "on_unparseable": BLOCK,         # what to do with a command the guard cannot parse
         "ops": {"stage": ASK, "commit": ASK, "push": ASK, "pr": ASK, "merge": BLOCK, "tag": BLOCK,
-                "release": BLOCK, "history": BLOCK, "destructive": BLOCK, "skip_hooks": BLOCK},
+                "release": BLOCK, "history": BLOCK, "destructive": BLOCK, "skip_hooks": BLOCK,
+                "destructive_fs": ASK, "secrets": ASK, "remote_exec": ASK},
     },
     "gate": {
         "mode": "enforce",               # enforce | advisory | off
@@ -57,7 +60,8 @@ PROFILES = {
     "standard": {},
     "strict": {
         "git": {"on_unparseable": BLOCK,
-                "ops": {"stage": BLOCK, "commit": BLOCK, "push": BLOCK, "pr": BLOCK}},
+                "ops": {"stage": BLOCK, "commit": BLOCK, "push": BLOCK, "pr": BLOCK,
+                        "secrets": BLOCK, "remote_exec": BLOCK}},
         "gate": {"default_threshold": 0.03, "critical_threshold": 0.005, "max_review_rounds": 3},
     },
     "light": {

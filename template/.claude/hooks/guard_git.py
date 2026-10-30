@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""PreToolUse(Bash) guard: applies the git policy in harness.json (`git.guard`, `git.ops`).
+"""PreToolUse(Bash) guard: applies the policy in harness.json (`git.guard`, `git.ops`) to git and gh
+operations, and to three non-git risks: recursive deletes (destructive_fs), reading secret files (secrets)
+and piping a download into a shell (remote_exec).
 
 Each git/gh operation maps to an op (stage, commit, push, pr, merge, tag, release, history,
 destructive, skip_hooks) whose policy is allow | ask | block:
@@ -22,6 +24,19 @@ SHELLS = {"bash", "sh", "zsh", "dash", "ksh", "fish"}
 WRAPPERS = {"command", "builtin", "exec", "nohup", "time", "sudo", "doas", "env", "xargs", "nice", "timeout", "caffeinate"}
 GIT_OPT_WITH_ARG = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--config-env", "--super-prefix"}
 SEPARATORS = {"&&", "||", ";", "|", "&", "(", ")", "\n", ";;", "|&"}
+INTERPRETERS = {"python", "python3", "node", "ruby", "perl", "deno", "bun"}
+# Files whose contents are credentials. Examples/templates of them are not.
+SECRET_PATH = re.compile(r"(^|/)(\.env(\.[\w.-]+)?|[\w.-]+\.(pem|key|p12|pfx)|id_(rsa|ed25519|ecdsa|dsa)|\.netrc|"
+                         r"\.pgpass|credentials(\.json)?|\.aws/credentials|\.npmrc|\.pypirc)$")
+SECRET_OK = re.compile(r"\.(example|sample|template|dist)$|\.pub$")
+# Read, copy or execute a file: anything that would put its contents into the transcript or elsewhere.
+READERS = {"cat", "less", "more", "head", "tail", "bat", "grep", "egrep", "rg", "ag", "sed", "awk", "cut", "sort",
+           "strings", "xxd", "od", "base64", "cp", "scp", "rsync", "source", ".", "nl", "tac", "diff", "jq", "yq"}
+REMOTE_EXEC = re.compile(r"\b(curl|wget)\b[^|;&]*\|\s*(sudo\s+)?(env\s+)?(ba|z|da|k|fi)?sh\b|"
+                         r"\b(curl|wget)\b[^|;&]*\|\s*(sudo\s+)?(python3?|node|ruby|perl)\b|"
+                         r"\b(ba|z)?sh\s+(-c\s+)?[\"']?\$\((curl|wget)\b|\b(ba|z)?sh\s+<\(\s*(curl|wget)\b")
+# git invoked from inside interpreter code: subprocess lists or shell strings.
+EMBEDDED_GIT = re.compile(r"""["']git["']\s*,\s*["']([a-z-]+)["']|\bgit\s+([a-z][a-z-]*)""")
 
 
 def load_policy() -> tuple[dict, str | None]:
@@ -160,10 +175,36 @@ def classify_gh(args: list[str]) -> list[tuple[str, str]]:
     return []
 
 
+def is_secret_path(tok: str) -> bool:
+    tok = tok.split("=", 1)[-1]  # --file=.env
+    return bool(SECRET_PATH.search(tok)) and not SECRET_OK.search(tok)
+
+
+def classify_other(prog: str, args: list[str]) -> list[tuple[str, str]]:
+    """Operations outside git that the guard still governs."""
+    ops: list[tuple[str, str]] = []
+    if prog == "rm" and any(re.match(r"^-[a-zA-Z]*[rR]", a) or a == "--recursive" for a in args):
+        ops.append(("destructive_fs", "rm -r"))
+    elif prog == "find" and "-delete" in args:
+        ops.append(("destructive_fs", "find -delete"))
+    if prog in READERS:
+        hits = [a for a in args if not a.startswith("-") and is_secret_path(a)]
+        if hits:
+            ops.append(("secrets", f"{prog} {hits[0]}"))
+    if prog in INTERPRETERS:
+        code = next((args[args.index(f) + 1] for f in ("-c", "-e", "--eval") if f in args[:-1]), "")
+        for m in EMBEDDED_GIT.finditer(code):
+            sub = m.group(1) or m.group(2)
+            ops += [(op, f"{what} (inside {prog} code)") for op, what in classify_git([sub])]
+    return ops
+
+
 def analyse(cmd: str, depth: int = 0) -> list[tuple[str, str]]:
     if depth > 4:
         raise ValueError("nesting too deep")
     ops: list[tuple[str, str]] = []
+    if depth == 0 and REMOTE_EXEC.search(cmd):
+        ops.append(("remote_exec", "downloaded script piped into a shell or interpreter"))
     for inner in nested(cmd):  # substitutions anywhere in the raw text (backticks survive tokenising badly)
         if inner.strip() and inner != cmd:
             ops += analyse(inner, depth + 1)
@@ -186,6 +227,11 @@ def analyse(cmd: str, depth: int = 0) -> list[tuple[str, str]]:
             ops += classify_git(args)
         elif prog == "gh":
             ops += classify_gh(args)
+        else:
+            ops += classify_other(prog, args)
+    # `< .env`: a secret file redirected into any command (`<` splits segments, so check the token stream)
+    toks = tokens(cmd)
+    ops += [("secrets", f"< {t}") for j, t in enumerate(toks[1:], 1) if toks[j - 1] == "<" and is_secret_path(t)]
     return ops
 
 
@@ -196,8 +242,13 @@ def main() -> int:
         return 0
     try:
         payload = json.load(sys.stdin)
-        cmd = payload.get("tool_input", {}).get("command", "")
-        found = analyse(cmd) if cmd else []
+        tool_input = payload.get("tool_input", {})
+        if payload.get("tool_name") == "Read":  # Claude's file tool reading a secret file
+            path = str(tool_input.get("file_path", ""))
+            found = [("secrets", f"Read {path}")] if is_secret_path(path) else []
+        else:
+            cmd = tool_input.get("command", "")
+            found = analyse(cmd) if cmd else []
         decision = max((policy.get("ops", {}).get(op, "block") for op, _ in found), key=RANK.get, default="allow")
         why = "; ".join(f"{op} ({what})" for op, what in found)
     except Exception as e:  # unparseable input: never silently allow
