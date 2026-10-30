@@ -242,7 +242,7 @@ class TestGate(Base):
         self.assertIn("lenses not run", out)
 
     def test_bool_probability_rejected(self):
-        self.review(findings=[self.finding(p=0.1) | {"p_trigger": False, "p_visible": True}])
+        self.review(findings=[{**self.finding(p=0.1), "p_trigger": False, "p_visible": True}])
         code, out = self.gate()
         self.assertEqual(code, 1)
         self.assertIn("must be a number", out)
