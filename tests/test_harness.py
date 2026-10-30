@@ -423,6 +423,51 @@ class TestWfNew(Base):
         self.assertEqual(json.loads((repo / ".work/t2/state.json").read_text())["track"], "lite")
 
 
+FAKE_CLAUDE = r"""#!/usr/bin/env python3
+# Stand-in for `claude -p`: the review session writes a passing R1, then prints a JSON result.
+import json, os, pathlib, subprocess, sys
+args = sys.argv[1:]
+pathlib.Path(os.environ["FAKE_ARGS"]).write_text(json.dumps(args))
+if "/wf-review x" in args:
+    head = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    cfg = json.loads(pathlib.Path(".claude/harness/harness.json").read_text())
+    rdir = pathlib.Path(".work/x/40-reviews"); rdir.mkdir(parents=True, exist_ok=True)
+    (rdir / "R1.findings.json").write_text(json.dumps({"round": 1, "head": head, "checks": {"test": "pass"},
+        "lenses_run": cfg["review"]["lenses"], "adversary_run": True, "findings": []}))
+print(json.dumps({"type": "result", "is_error": False, "result": "review written", "session_id": "s-1",
+                  "duration_ms": 120000, "total_cost_usd": 0.25, "num_turns": 7,
+                  "permission_denials": [{"tool_name": "Bash"}], "modelUsage": {"m": {}}}))
+"""
+
+
+class TestLoop(Base):
+    def test_loop_records_metrics_and_uses_configured_tools(self):
+        repo = make_repo(self.tmp)
+        set_cfg(repo, commands__test="pytest", loop__review_tools=["Read", "Bash(pytest:*)"])
+        commit_all(repo)
+        (repo / ".work/x").mkdir(parents=True)
+        bindir = self.tmp / "bin"; bindir.mkdir()
+        (bindir / "claude").write_text(FAKE_CLAUDE); (bindir / "claude").chmod(0o755)
+        env = {**ENV, "PATH": f"{bindir}:{ENV['PATH']}", "FAKE_ARGS": str(self.tmp / "args.json")}
+        r = run(["bash", ".claude/harness/scripts/wf-loop.sh", "x"], repo, check=False, env=env)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("review written", r.stdout)
+        args = json.loads((self.tmp / "args.json").read_text())
+        self.assertEqual(args[args.index("--allowedTools") + 1], "Read,Bash(pytest:*),Write(.work/x/**),Edit(.work/x/**)")
+        self.assertIn("json", args)
+        row = json.loads((repo / ".work/x/metrics.jsonl").read_text())
+        self.assertEqual((row["phase"], row["round"], row["cost_usd"], row["turns"], row["denied_tool_calls"]),
+                         ("review", 1, 0.25, 7, 1))
+        self.assertRegex(r.stdout, r"review\s+1\s+2\.0\s+0\.25\s+7\s+1\s+0")
+
+    def test_non_json_output_passes_through(self):
+        repo = make_repo(self.tmp)
+        commit_all(repo)
+        r = run(["python3", ".claude/harness/scripts/wf-metrics.py", "x", "record", "fix", "2"], repo, inp="plain text")
+        self.assertEqual(r.stdout.strip(), "plain text")
+        self.assertFalse(json.loads((repo / ".work/x/metrics.jsonl").read_text())["parsed"])
+
+
 class TestLocalMode(Base):
     def setUp(self):
         super().setUp()

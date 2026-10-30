@@ -54,6 +54,13 @@ BASE = {
         "lenses": ["correctness", "security", "scale", "operability", "design", "experience"],
         "adversary": True,
     },
+    # Headless sessions started by wf-loop.sh. The review session also gets Write/Edit scoped to the work dir.
+    # Both run under the git guard, and an "ask" decision is refused headless; narrow fix_tools (for example
+    # "Bash(npm test:*)") to limit what an unattended fix session can run. "Task" is the older name of "Agent".
+    "loop": {
+        "review_tools": ["Read", "Grep", "Glob", "Bash", "Agent", "Task", "WebSearch", "WebFetch"],
+        "fix_tools": ["Read", "Grep", "Glob", "Bash", "Agent", "Task", "Edit", "Write"],
+    },
     # Work-item tracks (wf-new.sh --track). "standard" uses `review`; "lite" is for small, low-risk changes
     # and is upgraded to standard automatically when the diff outgrows it (see wf-track.py).
     "tracks": {

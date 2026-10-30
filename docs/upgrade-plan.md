@@ -29,7 +29,7 @@ The harness stays a **v0.1 draft** until every stage below is done. Then it is p
 | AGENTS.md (D4) | Installer writes or updates a managed `<!-- harness:begin/end -->` block; project text outside it is preserved; `--no-agents-md` opts out | install tests |
 | Installer | Re-install no longer resets `default_branch`; branch detected from origin/HEAD; pyc and `.DS_Store` excluded; settings merge tolerates foreign hooks; templating without `sed` | install tests |
 | `wf-new.sh` | Falls back to the local base when origin lacks the harness; rolls back the branch and worktree on failure | test |
-| `wf-loop.sh` | Stops if the reviewer changed code or wrote no new round; reads effective config | manual |
+| `wf-loop.sh` | Stops if the reviewer changed code or wrote no new round; reads effective config; no longer exits silently before round 1 (empty-glob `ls` under pipefail) | test (fake `claude`) |
 | `bootstrap.sh` (D6) | `--sha` verification, SHA recorded in `SOURCE_REF`, guard check understands `ask`; fixed the empty-args crash on macOS bash 3.2 | end-to-end run |
 | Self-tests | `tests/test_harness.py` (29 tests, stdlib only) | all pass |
 
@@ -61,7 +61,7 @@ Read the project before changing it. Detection is deterministic; interpretation 
 |---|---|---|
 | F1 | **Done for `lite` / `standard`** (`wf-track.py`; `critical` not built). Tracks `lite` / `standard` / `critical` (`wf-new.sh --track`, `harness.json` `tracks.*`). Lite (D5) = ≤ ~150 changed lines, no `critical_paths`, no new deps or migrations → short spec, one review with correctness + security, no adversary | Gate test: lite track on a diff over the limit or touching a critical path is upgraded automatically |
 | F2 | Per-role models in agent frontmatter, configurable in `harness.json` `models` (fast model for researcher and lens reviewers on lite; strongest model for adversary, consolidation and spec) | — |
-| F3 | `wf-loop.sh` writes `.work/<slug>/metrics.jsonl` (duration and cost per headless call) | — |
+| F3 | **Done** (`wf-metrics.py`; also turns, refused tool calls, per-phase summary). `wf-loop.sh` writes `.work/<slug>/metrics.jsonl` (duration and cost per headless call) | — |
 | F4 | `install.sh --dry-run` | Test: no files written |
 
 ## Stage 4: measured quality, then release

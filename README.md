@@ -38,7 +38,7 @@ How strict the harness is (git policy and gate) is project config, from `strict`
 | `.claude/harness/RUBRIC.md` | Review checks per lens: correctness, security, scale, operability, design, experience, adversary. |
 | `.claude/harness/COMMITS.md` | Commit rules and their release-please effect. |
 | `.claude/harness/templates/` | Brief, investigation, spec and build-log templates. |
-| `.claude/harness/scripts/` | `wf-new.sh`, `wf-loop.sh`, `gate.py`, `hconfig.py`, `wf-state.py`, `wf-status.sh`, `wf-track.py`. |
+| `.claude/harness/scripts/` | `wf-new.sh`, `wf-loop.sh`, `gate.py`, `hconfig.py`, `wf-state.py`, `wf-status.sh`, `wf-track.py`, `wf-metrics.py`. |
 | `.claude/skills/wf-*` | The slash commands (`/wf-investigate` … `/wf-release`). |
 | `.claude/agents/` | The `wf-researcher`, `wf-lens-reviewer` and `wf-adversary` subagents. |
 | `.claude/hooks/` | `guard-git.sh` + `guard_git.py` (git policy for each operation) and `session-context.sh` (banner for each new session). |
@@ -196,6 +196,8 @@ so the builder's reasoning doesn't bias it. The builder answers each finding in 
   and pauses for you at every commit point (headless sessions can't approve "ask" operations).
   The loop stops if a reviewer changes code, or if a review session writes no new round.
   `--manual` runs only review + gate. `--fix-session <id>` resumes your build session instead of starting a fresh one.
+  Each session's duration, cost, turns and refused tool calls are appended to `.work/<slug>/metrics.jsonl`;
+  `wf-metrics.py <slug> summary` totals them per phase. Session tools: `loop.review_tools` / `loop.fix_tools`.
 
 ## The risk gate
 
@@ -236,7 +238,7 @@ python3 -I tests/test_harness.py
 ```
 
 The tests cover the installer, the git-guard corpus (`tests/guard_corpus.tsv`, about 90 commands), gate cases,
-the commit-msg hook, `wf-new.sh`, the lite track's upgrade rules, and local mode (no trace, shared worktree artifacts, uninstall). Add a test for every bug fixed.
+the commit-msg hook, `wf-new.sh`, the lite track's upgrade rules, `wf-loop.sh` with a stand-in `claude`, and local mode (no trace, shared worktree artifacts, uninstall). Add a test for every bug fixed.
 
 ## Limits worth knowing
 
@@ -245,6 +247,7 @@ the commit-msg hook, `wf-new.sh`, the lite track's upgrade rules, and local mode
   alias, writing to `.git` directly - can still get around it. For hard isolation, enable Claude Code's sandbox
   (filesystem and network restrictions enforced by the OS), especially with the `strict` profile.
 - The guard does not scan file contents for secrets. Pair it with a secret scanner in your git hooks or CI.
-- Headless loop runs give the fix session Bash; the guard still applies. To be stricter, narrow `FIX_TOOLS` in `wf-loop.sh`.
+- Headless loop runs give the fix session Bash; the guard still applies, and its "ask" decisions are refused headless.
+  To be stricter, narrow `loop.fix_tools` in `harness.json` (for example `"Bash(npm test:*)"`).
 - Review cost grows with the number of lenses. For small changes use the `light` profile or trim `review.lenses`.
 - Monorepos: add packages to `release-please-config.json` `packages` and set `include-component-in-tag: true`.
