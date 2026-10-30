@@ -333,6 +333,39 @@ class TestGate(Base):
         self.review(n=4, checks={"test": "fail"})
         self.assertEqual(self.gate()[0], 2)
 
+    def lite(self, files: dict) -> list:
+        """Start a lite work item at the current head, commit `files`, and review with the lite lenses only."""
+        cfg = json.loads((self.repo / ".claude/harness/harness.json").read_text())
+        lite = {"lenses": ["correctness", "security"], "adversary": False, **cfg.get("tracks", {}).get("lite", {})}
+        (self.repo / ".work/x/state.json").write_text(json.dumps({"slug": "x", "base": self.head, "track": "lite"}))
+        for name, text in files.items():
+            p = self.repo / name
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(text)
+        commit_all(self.repo, "feat: small change")
+        self.head = run(["git", "rev-parse", "HEAD"], self.repo).stdout.strip()
+        self.review(lenses_run=lite["lenses"], adversary_run=False)
+        return lite["lenses"]
+
+    def test_lite_track_small_change_needs_only_lite_lenses(self):
+        self.lite({"src/util.py": "x = 1\n"})
+        code, out = self.gate()
+        self.assertEqual(code, 0, out)
+        r = run(["python3", ".claude/harness/scripts/wf-track.py", "x"], self.repo)
+        self.assertEqual(json.loads(r.stdout)["track"], "lite")
+
+    def test_lite_track_upgrades_on_size_critical_path_and_dependencies(self):
+        cases = {"lines": {"src/big.py": "x = 1\n" * 151},
+                 "critical path": {"src/auth/login.py": "x = 1\n"},
+                 "dependencies": {"package.json": "{}\n"}}
+        for why, files in cases.items():
+            with self.subTest(why):
+                self.lite(files)
+                code, out = self.gate()
+                self.assertEqual(code, 1, out)
+                self.assertIn("lite track upgraded to standard", out)
+                self.assertIn("lenses not run", out)
+
     def test_unknown_profile_is_config_error(self):
         set_cfg(self.repo, profile="yolo")
         self.assertEqual(self.gate()[0], 3)
@@ -378,6 +411,16 @@ class TestWfNew(Base):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("basing on local main", r.stderr)
         self.assertTrue((self.tmp / "p.worktrees/demo/.work/demo/00-brief.md").exists())
+
+
+    def test_track_is_saved_and_validated(self):
+        repo = make_repo(self.tmp)
+        commit_all(repo)
+        r = run([".claude/harness/scripts/wf-new.sh", "t1", "try it", "--track", "huge", "--here"], repo, check=False)
+        self.assertEqual(r.returncode, 3, r.stderr)
+        r = run([".claude/harness/scripts/wf-new.sh", "t2", "try it", "--track", "lite", "--here"], repo, check=False)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads((repo / ".work/t2/state.json").read_text())["track"], "lite")
 
 
 class TestLocalMode(Base):

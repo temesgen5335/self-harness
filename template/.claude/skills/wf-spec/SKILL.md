@@ -13,6 +13,10 @@ Read ONLY: `.work/<slug>/00-brief.md`, `.work/<slug>/10-investigation.md`, and c
 If the investigation has unanswered questions that change the design, ask a maintainer first (one message, numbered).
 
 ## Do
+Track: `python3 .claude/harness/scripts/wf-track.py <slug>`. On the `lite` track write a short spec instead
+(steps 2, 3 and 6 may be one line each, "n/a — lite"); acceptance criteria and tasks are still required.
+If the work outgrows lite (the planner's `reasons`), switch: `wf-state.py <slug> set track=standard` and write the full spec.
+
 1. Write `.work/<slug>/20-spec.md` from its template. Every section filled or marked "n/a — because …".
 2. Design: give 2–3 real alternatives with trade-offs; choose one and say why. Prefer boring, observable, configurable.
 3. Design for the review lenses up front: security model, scale budgets, observability, customisation points,

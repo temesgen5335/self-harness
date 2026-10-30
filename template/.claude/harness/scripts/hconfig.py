@@ -54,6 +54,20 @@ BASE = {
         "lenses": ["correctness", "security", "scale", "operability", "design", "experience"],
         "adversary": True,
     },
+    # Work-item tracks (wf-new.sh --track). "standard" uses `review`; "lite" is for small, low-risk changes
+    # and is upgraded to standard automatically when the diff outgrows it (see wf-track.py).
+    "tracks": {
+        "lite": {
+            "max_changed_lines": 150,
+            "lenses": ["correctness", "security"],
+            "adversary": False,
+            # Changes that are never "small": dependency manifests and migrations.
+            "upgrade_paths": ["**/package.json", "**/package-lock.json", "**/pnpm-lock.yaml", "**/yarn.lock",
+                              "**/requirements*.txt", "**/pyproject.toml", "**/poetry.lock", "**/uv.lock",
+                              "**/go.mod", "**/go.sum", "**/Cargo.toml", "**/Cargo.lock", "**/pom.xml",
+                              "**/build.gradle*", "**/migrations/**", "**/alembic/**", "**/*.sql"],
+        },
+    },
 }
 
 PROFILES = {

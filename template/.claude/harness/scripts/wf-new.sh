@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
 # Start a work item: branch + worktree + .work/<slug>/ from templates.
-# Usage: wf-new.sh <slug> "<one-line brief>" [--type feat|fix|chore|refactor|docs] [--here]
+# Usage: wf-new.sh <slug> "<one-line brief>" [--type feat|fix|chore|refactor|docs] [--track lite|standard] [--here]
+#   --track  lite: small, low-risk change (two review lenses, no adversary); upgraded to standard
+#            automatically if the diff outgrows it (see wf-track.py). Default: standard.
 #   --here   use the current checkout instead of a new worktree
 set -euo pipefail
-usage() { echo "usage: wf-new.sh <slug> \"<one-line brief>\" [--type feat|fix|chore|refactor|docs] [--here]" >&2; exit 3; }
+usage() { echo "usage: wf-new.sh <slug> \"<one-line brief>\" [--type feat|fix|chore|refactor|docs] [--track lite|standard] [--here]" >&2; exit 3; }
 [[ $# -ge 2 ]] || usage
 slug="$1"; brief="$2"; shift 2
-type="feat"; here=0
+type="feat"; here=0; track="standard"
 while [[ $# -gt 0 ]]; do case "$1" in
-  --type) type="$2"; shift 2;; --here) here=1; shift;;
+  --type) type="$2"; shift 2;; --here) here=1; shift;; --track) track="$2"; shift 2;;
   *) echo "unknown arg: $1" >&2; usage;; esac; done
 [[ "$slug" =~ ^[a-z0-9][a-z0-9-]{1,40}$ ]] || { echo "slug must be kebab-case, 2-41 chars" >&2; exit 3; }
 [[ -n "$brief" ]] || usage
+[[ "$track" == lite || "$track" == standard ]] || { echo "--track must be lite or standard" >&2; exit 3; }
 
 root="$(git rev-parse --show-toplevel)"
 cfg="$root/.claude/harness/harness.json"
@@ -82,7 +85,7 @@ open(dst, "w").write(t)
 PY
 done
 ( cd "$dir" && python3 .claude/harness/scripts/wf-state.py "$slug" set \
-    slug="$slug" branch="$branch" base="$base_sha" phase=new review_round=0 created="$today" worktree="$dir" )
+    slug="$slug" branch="$branch" base="$base_sha" phase=new review_round=0 created="$today" worktree="$dir" track="$track" )
 trap - ERR
 
 cat << MSG

@@ -26,9 +26,12 @@ Run every non-empty command in `.claude/harness/harness.json` (`lint`, `typechec
 A failing check is a finding (`executed-repro`). Never trust a claim that checks passed.
 
 ## Fan out (parallel)
-- One `wf-lens-reviewer` per lens in `harness.json` `review.lenses`. Give each: lens, slug, base, head,
+Get the plan: `python3 .claude/harness/scripts/wf-track.py <slug>` → `lenses`, `adversary`, `reasons`.
+A lite work item gets fewer reviewers only while it stays small; the plan upgrades it otherwise. The gate uses the same plan.
+- One `wf-lens-reviewer` per lens in the plan's `lenses`. Give each: lens, slug, base, head,
   and the previous findings for that lens.
-- If `review.adversary` is true: one `wf-adversary` with slug, base, head, and the spec's critical tasks.
+- If the plan's `adversary` is true: one `wf-adversary` with slug, base, head, and the spec's critical tasks.
+- Report any `reasons` (track upgrades) in the TL;DR.
 
 ## Consolidate
 1. Merge and de-duplicate findings; renumber as F-001…; keep stable ids for carried-forward findings.

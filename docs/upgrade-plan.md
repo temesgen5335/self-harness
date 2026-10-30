@@ -59,7 +59,7 @@ Read the project before changing it. Detection is deterministic; interpretation 
 ## Stage 3: speed
 | ID | Change | Acceptance |
 |---|---|---|
-| F1 | Tracks `lite` / `standard` / `critical` (`wf-new.sh --track`, `harness.json` `tracks.*`). Lite (D5) = ≤ ~150 changed lines, no `critical_paths`, no new deps or migrations → short spec, one review with correctness + security, no adversary | Gate test: lite track on a diff over the limit or touching a critical path is upgraded automatically |
+| F1 | **Done for `lite` / `standard`** (`wf-track.py`; `critical` not built). Tracks `lite` / `standard` / `critical` (`wf-new.sh --track`, `harness.json` `tracks.*`). Lite (D5) = ≤ ~150 changed lines, no `critical_paths`, no new deps or migrations → short spec, one review with correctness + security, no adversary | Gate test: lite track on a diff over the limit or touching a critical path is upgraded automatically |
 | F2 | Per-role models in agent frontmatter, configurable in `harness.json` `models` (fast model for researcher and lens reviewers on lite; strongest model for adversary, consolidation and spec) | — |
 | F3 | `wf-loop.sh` writes `.work/<slug>/metrics.jsonl` (duration and cost per headless call) | — |
 | F4 | `install.sh --dry-run` | Test: no files written |

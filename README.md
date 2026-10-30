@@ -38,7 +38,7 @@ How strict the harness is (git policy and gate) is project config, from `strict`
 | `.claude/harness/RUBRIC.md` | Review checks per lens: correctness, security, scale, operability, design, experience, adversary. |
 | `.claude/harness/COMMITS.md` | Commit rules and their release-please effect. |
 | `.claude/harness/templates/` | Brief, investigation, spec and build-log templates. |
-| `.claude/harness/scripts/` | `wf-new.sh`, `wf-loop.sh`, `gate.py`, `hconfig.py`, `wf-state.py`, `wf-status.sh`. |
+| `.claude/harness/scripts/` | `wf-new.sh`, `wf-loop.sh`, `gate.py`, `hconfig.py`, `wf-state.py`, `wf-status.sh`, `wf-track.py`. |
 | `.claude/skills/wf-*` | The slash commands (`/wf-investigate` … `/wf-release`). |
 | `.claude/agents/` | The `wf-researcher`, `wf-lens-reviewer` and `wf-adversary` subagents. |
 | `.claude/hooks/` | `guard-git.sh` + `guard_git.py` (git policy for each operation) and `session-context.sh` (banner for each new session). |
@@ -167,6 +167,11 @@ Re-running it updates an existing install (`--force` is added automatically; `ha
 cd ../<repo>.worktrees/rate-limit && claude
 ```
 
+Small, low-risk change? Add `--track lite`: a short spec and two review lenses (correctness, security), no adversary.
+The work item upgrades itself to the standard track when the diff passes `tracks.lite.max_changed_lines` (150)
+or touches `gate.critical_paths`, dependency manifests or migrations (`tracks.lite.upgrade_paths`).
+`python3 .claude/harness/scripts/wf-track.py <slug>` shows the effective track and why; review and the gate both use it.
+
 | Step | Session | Command | Output |
 |---|---|---|---|
 | Investigate | fresh | `/wf-investigate rate-limit` | `10-investigation.md`: sourced facts, current versions, unknowns |
@@ -231,7 +236,7 @@ python3 -I tests/test_harness.py
 ```
 
 The tests cover the installer, the git-guard corpus (`tests/guard_corpus.tsv`, about 90 commands), gate cases,
-the commit-msg hook, `wf-new.sh`, and local mode (no trace, shared worktree artifacts, uninstall). Add a test for every bug fixed.
+the commit-msg hook, `wf-new.sh`, the lite track's upgrade rules, and local mode (no trace, shared worktree artifacts, uninstall). Add a test for every bug fixed.
 
 ## Limits worth knowing
 
