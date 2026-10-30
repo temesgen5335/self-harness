@@ -6,10 +6,10 @@
 #                                     settings.local.json, commit-msg hook in the git dir, .work shared across
 #                                     worktrees in the git dir, CLAUDE.md/AGENTS.md/.gitignore untouched.
 #                                     Fixed at first install; switch by running uninstall.sh first.
-#   --profile strict|standard|light|tenacious   initial profile (edit harness.json later); a profile with a
-#                                     same-named preset (tenacious) applies that preset too
-#   --preset <name>                   merge presets/<name>.json into harness.json once (e.g. tenacious),
-#                                     recorded as "preset"; its _install options set defaults such as --no-release
+#   --profile strict|standard|light|guided   initial profile (edit harness.json later)
+#   --preset <name>                   merge presets/local/<name>.json (private, gitignored) or presets/<name>.json
+#                                     into harness.json once, recorded as "preset"; its _install options set
+#                                     defaults such as --no-release
 #   --lead "Name <email>"             team lead (default: git user.name/user.email of whoever runs this)
 #   --collaborator "Name <email>"     add a collaborator (repeatable)
 #   --default-branch <name>           default: origin/HEAD, else current branch, else main
@@ -32,11 +32,13 @@ while [[ $# -gt 0 ]]; do case "$1" in
 [[ -z "$mode" || "$mode" == tracked || "$mode" == local ]] || { echo "--mode must be tracked or local" >&2; exit 3; }
 [[ -n "$target" && ( -d "$target/.git" || -f "$target/.git" ) ]] || { echo "target must be a git repo root" >&2; exit 3; }
 command -v python3 >/dev/null || { echo "python3 is required" >&2; exit 3; }
-[[ -z "$preset" && -n "$profile" && -f "$(dirname "$SRC")/presets/$profile.json" ]] && preset="$profile"
 preset_file=""
 if [[ -n "$preset" ]]; then
-  preset_file="$(dirname "$SRC")/presets/$preset.json"
-  [[ -f "$preset_file" ]] || { echo "unknown preset: $preset (see presets/)" >&2; exit 3; }
+  [[ "$preset" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "invalid preset name: $preset" >&2; exit 3; }
+  for d in presets/local presets; do
+    [[ -f "$(dirname "$SRC")/$d/$preset.json" ]] && { preset_file="$(dirname "$SRC")/$d/$preset.json"; break; }
+  done
+  [[ -n "$preset_file" ]] || { echo "unknown preset: $preset (see presets/ and presets/local/)" >&2; exit 3; }
   if [[ -z "$release" ]]; then
     release="$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])).get("_install",{}).get("release"); print("" if r is None else int(r))' "$preset_file")"
   fi
@@ -263,7 +265,7 @@ if [[ -n "$preset_file" ]]; then
 fi
 echo "Next:"
 echo "  1. Fill .claude/harness/harness.json \"commands\" (lint, typecheck, test, stress, build) and gate.critical_paths;"
-echo "     check \"team\" and \"profile\" (strict | standard | light | tenacious)."
+echo "     check \"team\" and \"profile\" (strict | standard | light | guided)."
 if [[ $mode == tracked ]]; then
   echo "  2. Review and commit the harness files yourself (worktrees only see committed files), then push:"
   echo "       git add .claude .githooks CLAUDE.md AGENTS.md .gitignore release-please-config.json .release-please-manifest.json .github"

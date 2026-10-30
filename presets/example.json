@@ -1,14 +1,13 @@
 {
-  "_about": "Tenacious engineering standards (https://tenacious-engineering-standards.pages.dev/). Applied by install.sh --preset tenacious; keys starting with _ are install options, not config.",
+  "_about": "Example preset: copy it to presets/local/<name>.json (gitignored) for your team or client and install with --preset <name>. Keys starting with _ are install options, not config.",
   "_install": {
     "release": false,
     "expects": [
-      "scripts/run-target.sh",
       ".github/pull_request_template.md",
       "docs/adr"
     ]
   },
-  "profile": "tenacious",
+  "profile": "guided",
   "branching": {
     "base": "dev",
     "prefixes": {
@@ -23,9 +22,9 @@
   },
   "commands": {
     "install": "make install",
-    "lint": "bash scripts/run-target.sh lint",
-    "test": "bash scripts/run-target.sh test",
-    "build": "bash scripts/run-target.sh build"
+    "lint": "make lint",
+    "test": "make test",
+    "build": "make build"
   },
   "gate": {
     "critical_paths": [
@@ -34,14 +33,10 @@
       "**/billing/**",
       "**/security/**",
       "**/migrations/**",
-      "**/alembic/**",
       "**/infra/**",
-      "**/terraform/**",
       "**/*.tf",
       "**/.github/workflows/**",
-      "**/prompts/**",
-      "**/shared/**",
-      "**/common/**"
+      "**/prompts/**"
     ]
   },
   "docs": {

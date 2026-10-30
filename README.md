@@ -65,7 +65,7 @@ only they approve specs, accept waivers and ask for git writes.
 
 Set `"profile"` in `harness.json`. A profile only sets defaults; any key you set yourself overrides it.
 
-| | `strict` | `standard` (default) | `light` | `tenacious` |
+| | `strict` | `standard` (default) | `light` | `guided` |
 |---|---|---|---|---|
 | Stage / commit / push / open PR | block (draft only) | **ask**: maintainer confirms each command | ask | **warn + reminder** (push: "print the command, the user runs it") |
 | Merge, tag, release, history rewrite, destructive, `--no-verify` | block | block | block | warn + reminder |
@@ -78,9 +78,9 @@ Set `"profile"` in `harness.json`. A profile only sets defaults; any key you set
 | Lenses | all 6 + adversary | all 6 + adversary | correctness + security | all 6 + adversary |
 | Manual validation before `/wf-pr` | — | — | — | **required** |
 
-`tenacious` also applies `presets/tenacious.json` (see Presets). Its guard warns because the Tenacious team
-decided the guard never blocks; secrets are the exception, since a warning after a secret was read or committed
-is too late. To warn on secrets too, set `git.always_enforce` to `[]`.
+`guided` is for teams that decided the guard never blocks: it warns, and both you and Claude see a reminder.
+Secrets are the exception, since a warning after a secret was read or committed is too late. To warn on secrets
+too, set `git.always_enforce` to `[]`.
 
 Fine-tuning:
 - `git.guard`: `enforce` / `warn` / `off`. In `warn`, Claude and you both see the reminder (`git.notes.<op>`),
@@ -122,36 +122,34 @@ Trade-offs of local mode:
 - After updating the harness in the main checkout, re-run `wf-new.sh` (or `uninstall.sh` + re-create) for existing worktrees.
 - `bootstrap.sh` checks that `git status` shows nothing from the harness.
 
-## Presets: a company's conventions in one flag
+## Presets: a team's conventions in one flag
 
-`install.sh <repo> --preset <name>` merges `presets/<name>.json` into `harness.json` once and records it as
-`"preset"`; re-running the installer never re-applies it over your later edits. Presets set conventions;
-profiles set strictness. `--profile tenacious` applies both.
+`install.sh <repo> --preset <name>` merges a preset into `harness.json` once and records it as `"preset"`;
+re-running the installer never re-applies it over your later edits. Presets set conventions (branch names, base
+branch, commands, critical paths, docs, validation) and can pick a profile; profiles set strictness.
 
-`--preset tenacious` follows the [Tenacious engineering standards](https://tenacious-engineering-standards.pages.dev/):
-
-| Standard | What the preset sets |
-|---|---|
-| Branching: `<type>/<ticket>-<description>` from `dev` | `branching.base=dev`, `feat` → `feature/`, `hotfix` type, warns without `--ticket` |
-| CI/CD: `make` targets via the template | `commands` run `bash scripts/run-target.sh lint/test/build` |
-| Code Review: code-owner areas | `gate.critical_paths` adds billing, infra, Terraform, workflows, prompts, shared code |
-| Pull Requests: the repo's template, base `dev` | `/wf-pr` fills `.github/pull_request_template.md` and prints the commands |
-| Manual Testing: evidence before promotion; frozen task set | `/wf-validate` required before `/wf-pr` (`validation.required`), `validation.frozen_task_set` |
-| Key Management: never read, print or commit secrets | secrets enforced by the guard (reads, staging, credential-like values in commits) |
-| Guard warns, never blocks (team decision) | `git.guard=warn` with reminders; push and merge are printed for you to run |
-| Documentation: ADRs, CHANGELOG `[Unreleased]` | `docs.adr_dir=docs/adr` (drafted by `/wf-spec`), `docs.changelog` (checked by `/wf-pr`) |
-| Release: staging is the gate, release log in `docs/RELEASES.md` | release-please off (`/wf-release` does not apply) |
+The installer looks for `presets/local/<name>.json` first, then `presets/<name>.json`. **`presets/local/` is
+gitignored:** keep presets for your company, clients and projects there, so their names and conventions never
+reach this public repo. Start from the tracked example:
 
 ```bash
-bash install.sh ~/work/<repo> --profile tenacious --mode local
+cp presets/example.json presets/local/acme.json      # edit: base branch, prefixes, commands, critical paths, notes
+bash install.sh ~/work/<repo> --preset acme --mode local
 .claude/harness/scripts/wf-new.sh invoice-export "Export invoices as CSV" --ticket ACME-123
 # -> branch feature/ACME-123-invoice-export from dev
 ```
 
-Use local mode on company repos: the harness is your workflow, not the team's, and leaves no trace in their git.
-It needs the repo to have adopted the project template (`scripts/run-target.sh`, the PR template, `docs/adr/`);
-the installer warns about anything missing. Hooks you run outside the repo (for example a
-company-level guard) run alongside this one; keep only one of them deciding on git commands.
+`presets/example.json` sets:
+
+| Convention | Keys |
+|---|---|
+| `<type>/<ticket>-<description>` from `dev`, `hotfix` type, warn without `--ticket` | `branching` |
+| Project commands (`make lint/test/build`) | `commands` |
+| Code-owner areas reviewed at the critical threshold | `gate.critical_paths` |
+| ADRs drafted by `/wf-spec`; CHANGELOG checked and PR template filled by `/wf-pr` | `docs` |
+| `/wf-validate` evidence before `/wf-pr`; frozen task set for LLM/RAG changes | `profile: guided`, `validation` |
+| Guard warns and reminds; secrets enforced; push and merge printed for you to run | `profile: guided`, `git.notes` |
+| No release-please; warn if the repo lacks the PR template or ADR folder | `_install.release`, `_install.expects` |
 
 ## Install into a project
 

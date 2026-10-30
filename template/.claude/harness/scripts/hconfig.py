@@ -8,7 +8,7 @@ Profiles set defaults only; any key in harness.json overrides them.
   strict   : Claude never stages/commits/pushes; gate enforces with tighter limits
   standard : git writes need explicit approval (ask); gate enforces           (default)
   light    : git writes need approval; gate is advisory; two lenses, no adversary
-  tenacious: Tenacious standards; the guard warns and reminds (secrets stay enforced); validation before PR
+  guided   : the guard warns and reminds instead of blocking (secrets stay enforced); validation before PR
 """
 from __future__ import annotations
 
@@ -100,10 +100,9 @@ PROFILES = {
                         "secrets": BLOCK, "remote_exec": BLOCK}},
         "gate": {"default_threshold": 0.03, "critical_threshold": 0.005, "max_review_rounds": 3},
     },
-    # Tenacious engineering standards: the guard warns and reminds (team decision), except for secrets,
-    # which stay enforced because a warning after a secret was read is too late. Conventions come from
-    # presets/tenacious.json, which install.sh applies with --profile tenacious.
-    "tenacious": {
+    # For teams whose guard must never block: it warns and reminds, except for secrets, which stay
+    # enforced because a warning after a secret was read is too late. A preset adds team conventions.
+    "guided": {
         "git": {
             "guard": "warn",
             "on_unparseable": ASK,
@@ -114,7 +113,7 @@ PROFILES = {
                 "commit": "Commit at a natural completion point; no Co-Authored-By or attribution; tell the user the hash, message and files.",
                 "push": "Push is the user's: print the exact git push command and wait for them to run it.",
                 "merge": "Merging is the user's: print the exact command and wait.",
-                "pr": "Draft the PR with /wf-pr (Tenacious template, base dev, never --fill) and print gh pr create for the user.",
+                "pr": "Draft the PR with /wf-pr (the project's PR template, never --fill) and print gh pr create for the user.",
                 "skip_hooks": "Never bypass hooks (--no-verify, core.hooksPath): fix what the hook found.",
                 "history": "Rewrites history: only when the user asked for exactly this; never on dev/staging/production.",
                 "destructive": "Discards work: only when the user asked for exactly this.",

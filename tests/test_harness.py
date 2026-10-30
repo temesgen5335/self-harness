@@ -546,11 +546,11 @@ class TestEvals(Base):
 
 
 class TestPreset(Base):
-    def test_tenacious_preset_names_branches_from_dev_without_release_please(self):
-        repo = make_repo(self.tmp, "proj", "--preset", "tenacious")
+    def test_example_preset_names_branches_from_dev_without_release_please(self):
+        repo = make_repo(self.tmp, "proj", "--preset", "example")
         self.assertFalse((repo / "release-please-config.json").exists())
         cfg = json.loads(run(["python3", ".claude/harness/scripts/hconfig.py"], repo).stdout)
-        self.assertEqual(cfg["commands"]["test"], "bash scripts/run-target.sh test")
+        self.assertEqual((cfg["commands"]["test"], cfg["profile"]), ("make test", "guided"))
         self.assertEqual(cfg["docs"]["adr_dir"], "docs/adr")
         commit_all(repo)
         run(["git", "branch", "dev"], repo)
@@ -563,9 +563,9 @@ class TestPreset(Base):
         self.assertEqual(run(["git", "branch", "--show-current"], repo).stdout.strip(), "chore/tidy")
 
     def test_rerunning_the_installer_keeps_edits_made_after_the_preset(self):
-        repo = make_repo(self.tmp, "proj", "--preset", "tenacious", "--mode", "local")
+        repo = make_repo(self.tmp, "proj", "--preset", "example", "--mode", "local")
         set_cfg(repo, commands__lint="npm run lint")
-        r = run(["bash", str(HARNESS / "install.sh"), str(repo), "--preset", "tenacious"], repo)
+        r = run(["bash", str(HARNESS / "install.sh"), str(repo), "--preset", "example"], repo)
         self.assertIn("already applied", r.stdout)
         cfg = json.loads(run(["python3", ".claude/harness/scripts/hconfig.py"], repo).stdout)
         self.assertEqual(cfg["commands"]["lint"], "npm run lint")
@@ -576,8 +576,29 @@ class TestPreset(Base):
         for args in (["--type", "feature"], ["--ticket", "ACME 12"]):
             r = run([".claude/harness/scripts/wf-new.sh", "x1", "b", *args, "--here"], repo, check=False)
             self.assertEqual(r.returncode, 3, (args, r.stderr))
-        r = run(["bash", str(HARNESS / "install.sh"), str(repo), "--preset", "nope"], repo, check=False)
-        self.assertEqual(r.returncode, 3)
+        for name in ("nope", "../presets/example", "local/x"):
+            r = run(["bash", str(HARNESS / "install.sh"), str(repo), "--preset", name], repo, check=False)
+            self.assertEqual(r.returncode, 3, name)
+
+    def test_private_preset_in_presets_local_wins_over_a_tracked_one(self):
+        local = HARNESS / "presets/local"
+        made = not local.exists()
+        local.mkdir(exist_ok=True)
+        f = local / "example.json"
+        self.assertFalse(f.exists(), "a real presets/local/example.json would be overwritten")
+        try:
+            f.write_text(json.dumps({"profile": "light", "commands": {"test": "private-test"}}))
+            repo = make_repo(self.tmp, "proj", "--preset", "example")
+            cfg = json.loads(run(["python3", ".claude/harness/scripts/hconfig.py"], repo).stdout)
+            self.assertEqual((cfg["commands"]["test"], cfg["profile"]), ("private-test", "light"))
+        finally:
+            f.unlink()
+            if made:
+                local.rmdir()
+
+    def test_presets_local_is_ignored_by_git(self):
+        r = run(["git", "check-ignore", "-q", "presets/local/anything.json"], HARNESS, check=False)
+        self.assertEqual(r.returncode, 0)
 
 
 class TestProfiles(Base):
@@ -596,16 +617,16 @@ class TestProfiles(Base):
         self.assertIs(user["review"]["adversary"], False)  # not the old default: an edit, kept
 
 
-class TestTenaciousProfile(Base):
+class TestGuidedProfile(Base):
     def setUp(self):
         super().setUp()
-        self.repo = make_repo(self.tmp, "proj", "--profile", "tenacious")
+        self.repo = make_repo(self.tmp, "proj", "--profile", "guided")
         commit_all(self.repo)
 
-    def test_profile_applies_the_preset(self):
+    def test_profile_warns_and_requires_validation(self):
         cfg = json.loads(run(["python3", ".claude/harness/scripts/hconfig.py"], self.repo).stdout)
-        self.assertEqual((cfg["profile"], cfg["preset"], cfg["branching"]["base"], cfg["git"]["guard"]),
-                         ("tenacious", "tenacious", "dev", "warn"))
+        self.assertEqual((cfg["profile"], cfg["git"]["guard"], cfg["git"]["always_enforce"]),
+                         ("guided", "warn", ["secrets"]))
         self.assertTrue(cfg["validation"]["required"])
 
     def test_git_operations_warn_with_a_reminder(self):
