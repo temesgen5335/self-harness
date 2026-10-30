@@ -9,6 +9,9 @@
 #
 # Headless sessions cannot answer permission prompts, so git ops set to "ask" are refused there:
 # the loop always waits for a human at every commit point.
+# Tools per session: harness.json loop.review_tools / loop.fix_tools.
+# Each session's duration, cost, turns and refused tool calls go to <work>/metrics.jsonl
+# (wf-metrics.py <slug> summary).
 set -euo pipefail
 slug="${1:-}"; shift || true
 manual=0; fix_sid=""
@@ -34,17 +37,24 @@ wait_for_clean_tree() {
     read -r ans; [[ "$ans" == "q" ]] && exit 1
   done
 }
-latest_review() { ls "$work"/40-reviews/R*.findings.json 2>/dev/null | wc -l | tr -d ' '; }  # count of rounds
+tools() { python3 "$H/hconfig.py" "$1" | python3 -c 'import json,sys; print(",".join(t for t in json.load(sys.stdin) if t))'; }
+# Run a headless session for review round <round>; record its metrics and print its result text.
+session() {
+  local phase="$1" rnd="$2"; shift 2
+  claude -p "$@" --output-format json | python3 "$H/wf-metrics.py" "$slug" record "$phase" "$rnd"
+}
+# Count of review rounds. Not `ls | wc`: with pipefail, ls on an empty glob would end the script.
+latest_review() { local f=("$work"/40-reviews/R*.findings.json); [[ -e "${f[0]}" ]] && echo "${#f[@]}" || echo 0; }
 
 # Reviewer: may write only under the work dir. Bash is broad, so the loop also verifies nothing else changed.
-REVIEW_TOOLS="Read,Grep,Glob,Bash,Agent,Task,WebSearch,WebFetch,Write(${work}/**),Edit(${work}/**)"
-FIX_TOOLS="Read,Grep,Glob,Bash,Agent,Task,Edit,Write"
+REVIEW_TOOLS="$(tools loop.review_tools)"; REVIEW_TOOLS="${REVIEW_TOOLS:+$REVIEW_TOOLS,}Write(${work}/**),Edit(${work}/**)"
+FIX_TOOLS="$(tools loop.fix_tools)"
 
 for ((i = 1; i <= max; i++)); do
   wait_for_clean_tree
   before="$(latest_review)"
   echo "== Round: fresh review session =="
-  claude -p "/wf-review $slug" --allowedTools "$REVIEW_TOOLS" --output-format text || echo "review session exited non-zero"
+  session review "$((before + 1))" "/wf-review $slug" --allowedTools "$REVIEW_TOOLS" || echo "review session exited non-zero"
   if [[ -n "$(code_status)" ]]; then
     echo "STOP — the review session changed files outside $wd/ (reviewers must not edit code):"; code_status; exit 4
   fi
@@ -53,7 +63,7 @@ for ((i = 1; i <= max; i++)); do
   fi
   set +e; python3 "$H/gate.py" "$slug"; code=$?; set -e
   case $code in
-    0) echo "Gate done (PASS, or advisory/off mode) — a maintainer opens the PR, later /wf-release."; exit 0;;
+    0) python3 "$H/wf-metrics.py" "$slug" summary; echo "Gate done (PASS, or advisory/off mode) — /wf-pr drafts the PR for a maintainer to open."; exit 0;;
     2) echo "ESCALATE — stop and revisit the spec with a maintainer."; exit 2;;
     1) ;;
     *) echo "gate error ($code)"; exit "$code";;
@@ -63,9 +73,10 @@ for ((i = 1; i <= max; i++)); do
   fi
   echo "== Fix session =="
   if [[ -n "$fix_sid" ]]; then
-    claude -p "/wf-fix $slug" --resume "$fix_sid" --allowedTools "$FIX_TOOLS" --permission-mode acceptEdits --output-format text
+    session fix "$(latest_review)" "/wf-fix $slug" --resume "$fix_sid" --allowedTools "$FIX_TOOLS" --permission-mode acceptEdits
   else
-    claude -p "/wf-fix $slug" --allowedTools "$FIX_TOOLS" --permission-mode acceptEdits --output-format text
+    session fix "$(latest_review)" "/wf-fix $slug" --allowedTools "$FIX_TOOLS" --permission-mode acceptEdits
   fi
 done
+python3 "$H/wf-metrics.py" "$slug" summary
 echo "Max rounds ($max) reached without PASS."; exit 2

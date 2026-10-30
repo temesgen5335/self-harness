@@ -14,16 +14,7 @@
     "stress": "",
     "build": ""
   },
-  "git": {
-    "guard": "enforce",
-    "ops": { "stage": "ask", "commit": "ask", "push": "ask", "pr": "ask" }
-  },
   "gate": {
-    "mode": "enforce",
     "critical_paths": ["**/auth/**", "**/payments/**", "**/migrations/**", "**/security/**"]
-  },
-  "review": {
-    "lenses": ["correctness", "security", "scale", "operability", "design", "experience"],
-    "adversary": true
   }
 }

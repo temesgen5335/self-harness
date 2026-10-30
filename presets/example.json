@@ -1,0 +1,50 @@
+{
+  "_about": "Example preset: copy it to presets/local/<name>.json (gitignored) for your team or client and install with --preset <name>. Keys starting with _ are install options, not config.",
+  "_install": {
+    "release": false,
+    "expects": [
+      ".github/pull_request_template.md",
+      "docs/adr"
+    ]
+  },
+  "profile": "guided",
+  "branching": {
+    "base": "dev",
+    "prefixes": {
+      "feat": "feature",
+      "fix": "fix",
+      "chore": "chore",
+      "refactor": "refactor",
+      "docs": "docs",
+      "hotfix": "hotfix"
+    },
+    "ticket": "warn"
+  },
+  "commands": {
+    "install": "make install",
+    "lint": "make lint",
+    "test": "make test",
+    "build": "make build"
+  },
+  "gate": {
+    "critical_paths": [
+      "**/auth/**",
+      "**/payments/**",
+      "**/billing/**",
+      "**/security/**",
+      "**/migrations/**",
+      "**/infra/**",
+      "**/*.tf",
+      "**/.github/workflows/**",
+      "**/prompts/**"
+    ]
+  },
+  "docs": {
+    "adr_dir": "docs/adr",
+    "changelog": "CHANGELOG.md",
+    "pr_template": ".github/pull_request_template.md"
+  },
+  "validation": {
+    "frozen_task_set": "evals/frozen-task-set/tasks.jsonl"
+  }
+}

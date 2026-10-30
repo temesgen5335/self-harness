@@ -1,0 +1,6 @@
+{
+  "brief": "Format amounts in cents for receipts",
+  "acs": ["AC-1: cents format as $D.CC", "AC-2: thousands are comma-separated", "AC-3: negatives format as -$D.CC",
+          "AC-4: anything but an int raises TypeError"],
+  "defect": null
+}

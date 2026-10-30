@@ -6,7 +6,10 @@
 #                                     settings.local.json, commit-msg hook in the git dir, .work shared across
 #                                     worktrees in the git dir, CLAUDE.md/AGENTS.md/.gitignore untouched.
 #                                     Fixed at first install; switch by running uninstall.sh first.
-#   --profile strict|standard|light   initial profile (edit harness.json later)
+#   --profile strict|standard|light|guided   initial profile (edit harness.json later)
+#   --preset <name>                   merge presets/local/<name>.json (private, gitignored) or presets/<name>.json
+#                                     into harness.json once, recorded as "preset"; its _install options set
+#                                     defaults such as --no-release
 #   --lead "Name <email>"             team lead (default: git user.name/user.email of whoever runs this)
 #   --collaborator "Name <email>"     add a collaborator (repeatable)
 #   --default-branch <name>           default: origin/HEAD, else current branch, else main
@@ -18,17 +21,28 @@
 set -euo pipefail
 SRC="$(cd "$(dirname "$0")" && pwd)/template"
 target="${1:-}"; shift || true
-mode=""; rtype=""; branch=""; release=""; force=0; profile=""; lead=""; collabs=(); agents_md=1
+mode=""; rtype=""; branch=""; release=""; force=0; profile=""; lead=""; collabs=(); agents_md=1; preset=""
 while [[ $# -gt 0 ]]; do case "$1" in
   --mode) mode="$2"; shift 2;;
   --release-type) rtype="$2"; shift 2;; --default-branch) branch="$2"; shift 2;;
-  --profile) profile="$2"; shift 2;; --lead) lead="$2"; shift 2;;
+  --profile) profile="$2"; shift 2;; --lead) lead="$2"; shift 2;; --preset) preset="$2"; shift 2;;
   --collaborator) collabs+=("$2"); shift 2;; --no-agents-md) agents_md=0; shift;;
   --no-release) release=0; shift;; --with-release) release=1; shift;; --force) force=1; shift;;
   *) echo "unknown arg: $1" >&2; exit 3;; esac; done
 [[ -z "$mode" || "$mode" == tracked || "$mode" == local ]] || { echo "--mode must be tracked or local" >&2; exit 3; }
 [[ -n "$target" && ( -d "$target/.git" || -f "$target/.git" ) ]] || { echo "target must be a git repo root" >&2; exit 3; }
 command -v python3 >/dev/null || { echo "python3 is required" >&2; exit 3; }
+preset_file=""
+if [[ -n "$preset" ]]; then
+  [[ "$preset" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "invalid preset name: $preset" >&2; exit 3; }
+  for d in presets/local presets; do
+    [[ -f "$(dirname "$SRC")/$d/$preset.json" ]] && { preset_file="$(dirname "$SRC")/$d/$preset.json"; break; }
+  done
+  [[ -n "$preset_file" ]] || { echo "unknown preset: $preset (see presets/ and presets/local/)" >&2; exit 3; }
+  if [[ -z "$release" ]]; then
+    release="$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])).get("_install",{}).get("release"); print("" if r is None else int(r))' "$preset_file")"
+  fi
+fi
 cd "$target"
 common="$(cd "$(git rev-parse --git-common-dir)" && pwd)"
 
@@ -68,18 +82,48 @@ done < <(find "$SRC" -type f ! -path "$SRC/release/*" ! -name '*.pyc' ! -name '.
 chmod +x .claude/hooks/*.sh .claude/hooks/*.py .claude/harness/scripts/*
 
 echo "harness.json"
-python3 - "$branch" "$profile" "$lead" "$mode" "${collabs[@]+"${collabs[@]}"}" << 'PY'
+python3 - "$branch" "$profile" "$lead" "$mode" "$preset_file" "${collabs[@]+"${collabs[@]}"}" << 'PY'
 import json, re, sys
-branch, profile, lead, mode, *collabs = sys.argv[1:]
+branch, profile, lead, mode, preset_file, *collabs = sys.argv[1:]
 p = ".claude/harness/harness.json"; c = json.load(open(p))
 def person(s):
     m = re.match(r"^\s*(.*?)\s*<([^>]*)>\s*$", s)
     return {"name": m.group(1), "email": m.group(2)} if m else {"name": s.strip(), "email": ""}
 changed = []
+def merge(base, over):
+    for k, v in over.items():
+        base[k] = merge(base.get(k, {}), v) if isinstance(v, dict) and isinstance(base.get(k), dict) else v
+    return base
+def leaves(d, pre=""):
+    for k, v in d.items():
+        yield from leaves(v, f"{pre}{k}.") if isinstance(v, dict) else [(f"{pre}{k}", v)]
+if preset_file:
+    name = preset_file.rsplit("/", 1)[-1][:-5]
+    if c.get("preset") == name:
+        # Applied once; re-applying would overwrite whatever the project has changed since.
+        changed.append(f"preset {name} already applied, not re-applied (edit harness.json)")
+    else:
+        pre = {k: v for k, v in json.load(open(preset_file)).items() if not k.startswith("_")}
+        before = dict(leaves(c))
+        merge(c, pre); c["preset"] = name
+        diff = [k for k, v in leaves(pre) if before.get(k) != v]
+        changed.append(f"preset={name} (set {', '.join(diff) or 'nothing new'})")
+# Earlier templates pinned these profile-governed keys, which silently overrode every profile.
+# Drop them when they still hold those old defaults; edited values are kept.
+OLD = {("git", "guard"): "enforce", ("git", "ops"): {"stage": "ask", "commit": "ask", "push": "ask", "pr": "ask"},
+       ("gate", "mode"): "enforce",
+       ("review", "lenses"): ["correctness", "security", "scale", "operability", "design", "experience"],
+       ("review", "adversary"): True}
+for (sec, key), val in OLD.items():
+    if isinstance(c.get(sec), dict) and c[sec].get(key) == val:
+        del c[sec][key]; changed.append(f"removed pinned default {sec}.{key}")
+        if not c[sec]: del c[sec]
 if c.get("mode") != mode: c["mode"] = mode; changed.append(f"mode={mode}")
 if branch: c["default_branch"] = branch; changed.append(f"default_branch={branch}")
 if profile:
-    if profile not in ("strict", "standard", "light"): sys.exit(f"unknown profile: {profile}")
+    sys.path.insert(0, ".claude/harness/scripts")
+    from hconfig import PROFILES
+    if profile not in PROFILES: sys.exit(f"unknown profile: {profile} (use one of: {', '.join(PROFILES)})")
     c["profile"] = profile; changed.append(f"profile={profile}")
 team = c.setdefault("team", {"lead": {"name": "", "email": ""}, "collaborators": []})
 if lead: team["lead"] = person(lead); changed.append(f"lead={lead}")
@@ -102,8 +146,14 @@ dst["attribution"] = src["attribution"]
 hooks = dst.setdefault("hooks", {})
 for event, entries in src["hooks"].items():
     cur = hooks.setdefault(event, [])
-    have = {h.get("command") for e in cur for h in e.get("hooks", [])}
-    cur += [e for e in entries if not any(h.get("command") in have for h in e["hooks"])]
+    for e in entries:
+        cmds = {h.get("command") for h in e["hooks"]}
+        mine = [c for c in cur if cmds & {h.get("command") for h in c.get("hooks", [])}]
+        if not mine:
+            cur.append(e)
+        elif "matcher" in e:
+            for c in mine:  # an upgrade may widen what a harness hook covers (e.g. Bash -> Bash|Read)
+                c["matcher"] = e["matcher"]
 os.makedirs(".claude", exist_ok=True)
 open(dst_p, "w").write(json.dumps(dst, indent=2) + "\n")
 print("  merged", dst_p)
@@ -208,9 +258,14 @@ fi
 
 echo
 echo "Installed harness $(cat .claude/harness/VERSION) in $mode mode · effective config: python3 .claude/harness/scripts/hconfig.py"
+if [[ -n "$preset_file" ]]; then
+  while IFS= read -r p; do
+    [[ -z "$p" || -e "$p" ]] || echo "WARNING: preset '$preset' expects $p, which this repo lacks; adopt the project template or edit harness.json."
+  done < <(python3 -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1])).get("_install",{}).get("expects",[])))' "$preset_file")
+fi
 echo "Next:"
 echo "  1. Fill .claude/harness/harness.json \"commands\" (lint, typecheck, test, stress, build) and gate.critical_paths;"
-echo "     check \"team\" and \"profile\" (strict | standard | light)."
+echo "     check \"team\" and \"profile\" (strict | standard | light | guided)."
 if [[ $mode == tracked ]]; then
   echo "  2. Review and commit the harness files yourself (worktrees only see committed files), then push:"
   echo "       git add .claude .githooks CLAUDE.md AGENTS.md .gitignore release-please-config.json .release-please-manifest.json .github"

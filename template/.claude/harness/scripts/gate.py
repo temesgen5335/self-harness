@@ -20,6 +20,15 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from hconfig import ConfigError, is_team_member, load, required_checks, team_members  # noqa: E402
 
+
+def review_plan(root: pathlib.Path, cfg: dict, slug: str) -> dict:
+    """The track-aware lens plan from wf-track.py (a hyphenated script, so loaded by path)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("wf_track", pathlib.Path(__file__).with_name("wf-track.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod.plan(root, cfg, slug)
+
 CLASSES = {"security-exploitable", "data-loss", "functional", "degradation",
            "operability", "design", "cosmetic"}
 EVIDENCE = {"executed-repro", "failing-test", "code-path", "assumption"}
@@ -186,11 +195,13 @@ def main() -> int:
             if str(checks.get(name, "")).lower() not in ("pass", "passed", "ok"):
                 blocks.append(f"required check '{name}' not reported as pass (got {checks.get(name, 'missing')!r})")
 
-        # Every configured reviewer actually ran.
+        # Every reviewer the work item's track requires actually ran (lite tracks upgrade themselves).
+        rplan = review_plan(root, cfg, slug)
+        warnings.extend(rplan["reasons"])
         if g["require_all_lenses"]:
             ran = set(data.get("lenses_run", []))
-            missing = [l for l in cfg["review"]["lenses"] if l not in ran]
-            if cfg["review"]["adversary"] and not data.get("adversary_run"):
+            missing = [l for l in rplan["lenses"] if l not in ran]
+            if rplan["adversary"] and not data.get("adversary_run"):
                 missing.append("adversary")
             if missing:
                 blocks.append(f"review incomplete — lenses not run: {', '.join(missing)}")

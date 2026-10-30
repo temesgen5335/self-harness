@@ -8,6 +8,7 @@ Profiles set defaults only; any key in harness.json overrides them.
   strict   : Claude never stages/commits/pushes; gate enforces with tighter limits
   standard : git writes need explicit approval (ask); gate enforces           (default)
   light    : git writes need approval; gate is advisory; two lenses, no adversary
+  guided   : the guard warns and reminds instead of blocking (secrets stay enforced); validation before PR
 """
 from __future__ import annotations
 
@@ -18,7 +19,9 @@ import subprocess
 import sys
 
 ALLOW, ASK, BLOCK = "allow", "ask", "block"
-GIT_OPS = ("stage", "commit", "push", "pr", "merge", "tag", "release", "history", "destructive", "skip_hooks")
+GIT_OPS = ("stage", "commit", "push", "pr", "merge", "tag", "release", "history", "destructive", "skip_hooks",
+           # beyond git: recursive deletes, reading secret files, piping downloads into a shell
+           "destructive_fs", "secrets", "remote_exec")
 
 BASE = {
     "profile": "standard",
@@ -27,11 +30,26 @@ BASE = {
     "default_branch": "main",
     "team": {"lead": {"name": "", "email": ""}, "collaborators": []},
     "commands": {"install": "", "lint": "", "typecheck": "", "test": "", "stress": "", "build": ""},
+    # Work branches (wf-new.sh): <prefix>/[<ticket>-]<slug>, cut from `base` (empty = default_branch).
+    # ticket: "optional", or "warn" to warn when wf-new.sh gets no --ticket.
+    "branching": {
+        "base": "",
+        "prefixes": {"feat": "feat", "fix": "fix", "chore": "chore", "refactor": "refactor", "docs": "docs"},
+        "ticket": "optional",
+    },
+    # Project docs the workflow writes to when set: ADRs from /wf-spec, the changelog and PR body from /wf-pr.
+    "docs": {"adr_dir": "", "changelog": "", "pr_template": ".github/pull_request_template.md"},
+    # /wf-validate: where evidence goes is the work dir; a frozen task set is re-run for LLM/RAG changes.
+    # required: /wf-pr asks for a recorded /wf-validate result (go / go with accepted risk) first.
+    "validation": {"frozen_task_set": "", "required": False},
     "git": {
         "guard": "enforce",              # enforce | warn | off
         "on_unparseable": BLOCK,         # what to do with a command the guard cannot parse
         "ops": {"stage": ASK, "commit": ASK, "push": ASK, "pr": ASK, "merge": BLOCK, "tag": BLOCK,
-                "release": BLOCK, "history": BLOCK, "destructive": BLOCK, "skip_hooks": BLOCK},
+                "release": BLOCK, "history": BLOCK, "destructive": BLOCK, "skip_hooks": BLOCK,
+                "destructive_fs": ASK, "secrets": ASK, "remote_exec": ASK},
+        "always_enforce": [],            # ops that keep their decision when guard is "warn"
+        "notes": {},                     # op -> reminder added to warn-mode messages
     },
     "gate": {
         "mode": "enforce",               # enforce | advisory | off
@@ -51,14 +69,59 @@ BASE = {
         "lenses": ["correctness", "security", "scale", "operability", "design", "experience"],
         "adversary": True,
     },
+    # Headless sessions started by wf-loop.sh. The review session also gets Write/Edit scoped to the work dir.
+    # Both run under the git guard, and an "ask" decision is refused headless; narrow fix_tools (for example
+    # "Bash(npm test:*)") to limit what an unattended fix session can run. "Task" is the older name of "Agent".
+    "loop": {
+        "review_tools": ["Read", "Grep", "Glob", "Bash", "Agent", "Task", "WebSearch", "WebFetch"],
+        "fix_tools": ["Read", "Grep", "Glob", "Bash", "Agent", "Task", "Edit", "Write"],
+    },
+    # Work-item tracks (wf-new.sh --track). "standard" uses `review`; "lite" is for small, low-risk changes
+    # and is upgraded to standard automatically when the diff outgrows it (see wf-track.py).
+    "tracks": {
+        "lite": {
+            "max_changed_lines": 150,
+            "lenses": ["correctness", "security"],
+            "adversary": False,
+            # Changes that are never "small": dependency manifests and migrations.
+            "upgrade_paths": ["**/package.json", "**/package-lock.json", "**/pnpm-lock.yaml", "**/yarn.lock",
+                              "**/requirements*.txt", "**/pyproject.toml", "**/poetry.lock", "**/uv.lock",
+                              "**/go.mod", "**/go.sum", "**/Cargo.toml", "**/Cargo.lock", "**/pom.xml",
+                              "**/build.gradle*", "**/migrations/**", "**/alembic/**", "**/*.sql"],
+        },
+    },
 }
 
 PROFILES = {
     "standard": {},
     "strict": {
         "git": {"on_unparseable": BLOCK,
-                "ops": {"stage": BLOCK, "commit": BLOCK, "push": BLOCK, "pr": BLOCK}},
+                "ops": {"stage": BLOCK, "commit": BLOCK, "push": BLOCK, "pr": BLOCK,
+                        "secrets": BLOCK, "remote_exec": BLOCK}},
         "gate": {"default_threshold": 0.03, "critical_threshold": 0.005, "max_review_rounds": 3},
+    },
+    # For teams whose guard must never block: it warns and reminds, except for secrets, which stay
+    # enforced because a warning after a secret was read is too late. A preset adds team conventions.
+    "guided": {
+        "git": {
+            "guard": "warn",
+            "on_unparseable": ASK,
+            "always_enforce": ["secrets"],
+            "ops": {"stage": ALLOW, "commit": ASK, "push": BLOCK, "pr": ASK, "merge": BLOCK,
+                    "secrets": BLOCK, "remote_exec": ASK},
+            "notes": {
+                "commit": "Commit at a natural completion point; no Co-Authored-By or attribution; tell the user the hash, message and files.",
+                "push": "Push is the user's: print the exact git push command and wait for them to run it.",
+                "merge": "Merging is the user's: print the exact command and wait.",
+                "pr": "Draft the PR with /wf-pr (the project's PR template, never --fill) and print gh pr create for the user.",
+                "skip_hooks": "Never bypass hooks (--no-verify, core.hooksPath): fix what the hook found.",
+                "history": "Rewrites history: only when the user asked for exactly this; never on dev/staging/production.",
+                "destructive": "Discards work: only when the user asked for exactly this.",
+                "destructive_fs": "Recursive delete: check the target first.",
+                "remote_exec": "Piping a download into a shell: pin and inspect it instead.",
+            },
+        },
+        "validation": {"required": True},
     },
     "light": {
         "git": {"on_unparseable": ASK},

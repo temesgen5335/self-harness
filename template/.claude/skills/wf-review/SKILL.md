@@ -16,7 +16,7 @@ You never edit source or tests. You write only under `.work/<slug>/`.
 
 ## Setup
 1. Slug from `$ARGUMENTS` or the branch's state.json. If uncommitted changes exist, note that they are NOT reviewed.
-2. `base` = state.json `base` (fall back to `git merge-base origin/<default_branch> HEAD`); `head` = `git rev-parse HEAD`.
+2. `base` = state.json `base` (fall back to `git merge-base origin/<branching.base or default_branch> HEAD`); `head` = `git rev-parse HEAD`.
 3. Round n = number of existing `R*.findings.json` + 1. Load the previous round's findings (if any) and
    `R<n-1>.response.md` from the builder (fixed / disputed / deferred per finding).
 4. Read the spec (§3, §4–§12) and `git log --oneline base..head`, `git diff --stat base...head`. Do not read the build log.
@@ -26,9 +26,12 @@ Run every non-empty command in `.claude/harness/harness.json` (`lint`, `typechec
 A failing check is a finding (`executed-repro`). Never trust a claim that checks passed.
 
 ## Fan out (parallel)
-- One `wf-lens-reviewer` per lens in `harness.json` `review.lenses`. Give each: lens, slug, base, head,
+Get the plan: `python3 .claude/harness/scripts/wf-track.py <slug>` → `lenses`, `adversary`, `reasons`.
+A lite work item gets fewer reviewers only while it stays small; the plan upgrades it otherwise. The gate uses the same plan.
+- One `wf-lens-reviewer` per lens in the plan's `lenses`. Give each: lens, slug, base, head,
   and the previous findings for that lens.
-- If `review.adversary` is true: one `wf-adversary` with slug, base, head, and the spec's critical tasks.
+- If the plan's `adversary` is true: one `wf-adversary` with slug, base, head, and the spec's critical tasks.
+- Report any `reasons` (track upgrades) in the TL;DR.
 
 ## Consolidate
 1. Merge and de-duplicate findings; renumber as F-001…; keep stable ids for carried-forward findings.

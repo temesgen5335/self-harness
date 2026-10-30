@@ -4,7 +4,7 @@ Date: 2026-10-13 · Status: in progress
 Inputs: the v0.1-draft code review, [research-plan.md](research-plan.md), and maintainer decisions (below).
 
 The harness stays a **v0.1 draft** until every stage below is done. Then it is published on GitHub
-(`temesgen5335/harness`) and tagged `v0.1.0`; there are no intermediate versions.
+(`temesgen5335/self-harness`) and tagged `v0.1.0`; there are no intermediate versions.
 
 ## Maintainer decisions (2026-10-13)
 | # | Decision |
@@ -29,7 +29,7 @@ The harness stays a **v0.1 draft** until every stage below is done. Then it is p
 | AGENTS.md (D4) | Installer writes or updates a managed `<!-- harness:begin/end -->` block; project text outside it is preserved; `--no-agents-md` opts out | install tests |
 | Installer | Re-install no longer resets `default_branch`; branch detected from origin/HEAD; pyc and `.DS_Store` excluded; settings merge tolerates foreign hooks; templating without `sed` | install tests |
 | `wf-new.sh` | Falls back to the local base when origin lacks the harness; rolls back the branch and worktree on failure | test |
-| `wf-loop.sh` | Stops if the reviewer changed code or wrote no new round; reads effective config | manual |
+| `wf-loop.sh` | Stops if the reviewer changed code or wrote no new round; reads effective config; no longer exits silently before round 1 (empty-glob `ls` under pipefail) | test (fake `claude`) |
 | `bootstrap.sh` (D6) | `--sha` verification, SHA recorded in `SOURCE_REF`, guard check understands `ask`; fixed the empty-args crash on macOS bash 3.2 | end-to-end run |
 | Self-tests | `tests/test_harness.py` (29 tests, stdlib only) | all pass |
 
@@ -59,19 +59,27 @@ Read the project before changing it. Detection is deterministic; interpretation 
 ## Stage 3: speed
 | ID | Change | Acceptance |
 |---|---|---|
-| F1 | Tracks `lite` / `standard` / `critical` (`wf-new.sh --track`, `harness.json` `tracks.*`). Lite (D5) = ≤ ~150 changed lines, no `critical_paths`, no new deps or migrations → short spec, one review with correctness + security, no adversary | Gate test: lite track on a diff over the limit or touching a critical path is upgraded automatically |
+| F1 | **Done for `lite` / `standard`** (`wf-track.py`; `critical` not built). Tracks `lite` / `standard` / `critical` (`wf-new.sh --track`, `harness.json` `tracks.*`). Lite (D5) = ≤ ~150 changed lines, no `critical_paths`, no new deps or migrations → short spec, one review with correctness + security, no adversary | Gate test: lite track on a diff over the limit or touching a critical path is upgraded automatically |
 | F2 | Per-role models in agent frontmatter, configurable in `harness.json` `models` (fast model for researcher and lens reviewers on lite; strongest model for adversary, consolidation and spec) | — |
-| F3 | `wf-loop.sh` writes `.work/<slug>/metrics.jsonl` (duration and cost per headless call) | — |
+| F3 | **Done** (`wf-metrics.py`; also turns, refused tool calls, per-phase summary). `wf-loop.sh` writes `.work/<slug>/metrics.jsonl` (duration and cost per headless call) | — |
 | F4 | `install.sh --dry-run` | Test: no files written |
 
 ## Stage 4: measured quality, then release
 | ID | Change |
 |---|---|
-| G1 | `evals/`: fixture repos with seeded defects (injection, race, missing AC test, unbounded query, swallowed error); headless `/wf-review` catch rate per lens |
-| G2 | Gate consistency test: the same diff reviewed 3×; report how much the findings and exposures vary |
-| G3 | CI for the harness repo (macOS + Ubuntu, Python 3.8 + 3.12) running `tests/` |
+| G1 | **Built, not yet run** (`evals/run_evals.py`, 5 seeded cases + 1 clean control; scoring unit-tested with a stand-in `claude`). `evals/`: fixture repos with seeded defects (injection, race, missing AC test, unbounded query, swallowed error); headless `/wf-review` catch rate per lens |
+| G2 | **Built, not yet run** (`run_evals.py --runs 3`: catch rate, verdict agreement, exposure range). Gate consistency test: the same diff reviewed 3×; report how much the findings and exposures vary |
+| G3 | **Done** (`.github/workflows/test.yml`). CI for the harness repo (macOS + Ubuntu, Python 3.8 + 3.12) running `tests/` |
 | G4 | One real pilot project run end to end (research plan §3) |
 | G5 | **Release:** create the GitHub repo, push, tag `v0.1.0`, publish the release with its SHA, and update the README install line |
+
+## Stage 5: team presets ✅ done (2026-10-30)
+| ID | Change | Acceptance |
+|---|---|---|
+| P1 | `branching.*` (base, type → prefix, ticket), `docs.*` (ADR dir, changelog, PR template), `validation.*` config | test |
+| P2 | `install.sh --preset <name>`; `presets/example.json` (dev base, `feature/<ticket>-…`, make commands, code-owner critical paths, release-please off); private presets in gitignored `presets/local/`; `guided` profile | test |
+| P3 | `/wf-pr` (PR draft from the project template, commands printed, never run) and `/wf-validate` (AC test cases, evidence, go / hold) | manual (not yet run on a real repo) |
+| P4 | `/wf-spec` drafts an ADR in `docs.adr_dir` for architecture decisions | manual |
 
 ## Open questions
 - Local mode: should `wf-new.sh` offer a `--sync` to refresh the harness copy in existing worktrees after an update?

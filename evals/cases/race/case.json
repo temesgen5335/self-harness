@@ -1,0 +1,7 @@
+{
+  "brief": "Reserve stock for checkout from the worker pool",
+  "acs": ["AC-1: reserve(n) takes n units when at least n are left", "AC-2: reserve(n) returns False when fewer than n are left",
+          "AC-3: stock never goes negative under concurrent reservations"],
+  "defect": {"title": "Race: check-then-act on units without the lock", "file": "app/stock.py",
+             "lenses": ["correctness", "scale"], "keywords": ["race", "lock", "concurren", "atomic", "thread"]}
+}

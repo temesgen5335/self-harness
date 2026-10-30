@@ -8,7 +8,8 @@ plan  -> `/wf-investigate` (fresh session) -> `/wf-spec` (fresh session, maintai
 build -> `/wf-build` one task at a time -> `/wf-commit` drafts -> commit (see Git)
 review-> `/wf-review` in a FRESH session per round -> `/wf-gate`
 fix   -> `/wf-fix` in the build session -> drafts -> commit -> next review round
-publish -> PR + merge (maintainer) -> release-please PR -> `/wf-release` go/no-go -> maintainer merges
+publish -> `/wf-pr` drafts the PR (maintainer pushes, opens, merges) -> `/wf-validate` before promotion when the
+           project validates releases -> release-please PR -> `/wf-release` go/no-go -> maintainer merges
 
 Never do two phases in one session. The only memory between sessions is `.work/<slug>/`.
 
@@ -27,6 +28,8 @@ Never do two phases in one session. The only memory between sessions is `.work/<
 ## Spec is the contract
 - Build only what the approved spec says. A needed deviation = write a Spec Change Request in the build log and stop.
 - Every acceptance criterion maps to at least one test.
+- Lite track (`wf-new.sh --track lite`): a short spec and fewer reviewers, for small low-risk changes only.
+  It upgrades itself to standard when the diff grows or touches critical paths, dependencies or migrations (`wf-track.py`).
 
 ## Quality bar
 - Work ships when `/wf-gate` returns PASS. The gate's strictness (`gate.mode`, thresholds) is project config; never override its output.

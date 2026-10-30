@@ -20,7 +20,7 @@ How strict the harness is (git policy and gate) is project config, from `strict`
                                                                      ▲                     │
                                                        /wf-fix ◄─────┤                     ▼
                                                      (response.md)   │ BLOCK      /wf-review (fresh session per round)
-                                                                     └──────────── gate.py ──► PASS ──► maintainer opens PR, merges
+                                                                     └──────────── gate.py ──► PASS ──► /wf-pr draft ──► maintainer opens PR, merges
                                                                                                          │
                                                                     release-please PR ◄──────────────────┘
                                                                     /wf-release go/no-go ──► maintainer merges release PR
@@ -38,7 +38,7 @@ How strict the harness is (git policy and gate) is project config, from `strict`
 | `.claude/harness/RUBRIC.md` | Review checks per lens: correctness, security, scale, operability, design, experience, adversary. |
 | `.claude/harness/COMMITS.md` | Commit rules and their release-please effect. |
 | `.claude/harness/templates/` | Brief, investigation, spec and build-log templates. |
-| `.claude/harness/scripts/` | `wf-new.sh`, `wf-loop.sh`, `gate.py`, `hconfig.py`, `wf-state.py`, `wf-status.sh`. |
+| `.claude/harness/scripts/` | `wf-new.sh`, `wf-loop.sh`, `gate.py`, `hconfig.py`, `wf-state.py`, `wf-status.sh`, `wf-track.py`, `wf-metrics.py`. |
 | `.claude/skills/wf-*` | The slash commands (`/wf-investigate` … `/wf-release`). |
 | `.claude/agents/` | The `wf-researcher`, `wf-lens-reviewer` and `wf-adversary` subagents. |
 | `.claude/hooks/` | `guard-git.sh` + `guard_git.py` (git policy for each operation) and `session-context.sh` (banner for each new session). |
@@ -65,19 +65,33 @@ only they approve specs, accept waivers and ask for git writes.
 
 Set `"profile"` in `harness.json`. A profile only sets defaults; any key you set yourself overrides it.
 
-| | `strict` | `standard` (default) | `light` |
-|---|---|---|---|
-| Stage / commit / push / open PR | block (draft only) | **ask**: maintainer confirms each command | ask |
-| Merge, tag, release, history rewrite, destructive, `--no-verify` | block | block | block |
-| Gate mode | enforce | enforce | **advisory** (reports, doesn't stop) |
-| Thresholds (default / critical) | 3% / 0.5% | 5% / 1% | 5% / 1% |
-| Stale review, dirty tree | block | block | warn |
-| Lenses | all 6 + adversary | all 6 + adversary | correctness + security |
+| | `strict` | `standard` (default) | `light` | `guided` |
+|---|---|---|---|---|
+| Stage / commit / push / open PR | block (draft only) | **ask**: maintainer confirms each command | ask | **warn + reminder** (push: "print the command, the user runs it") |
+| Merge, tag, release, history rewrite, destructive, `--no-verify` | block | block | block | warn + reminder |
+| Read or commit a secret (`.env`, keys, credential-like values) | block | **ask** | ask | **block** (still enforced) |
+| Pipe a download into a shell | block | ask | ask | warn |
+| Recursive delete (`rm -r`, `find -delete`) | ask | ask | ask | warn |
+| Gate mode | enforce | enforce | **advisory** (reports, doesn't stop) | enforce |
+| Thresholds (default / critical) | 3% / 0.5% | 5% / 1% | 5% / 1% | 5% / 1% |
+| Stale review, dirty tree | block | block | warn | block |
+| Lenses | all 6 + adversary | all 6 + adversary | correctness + security | all 6 + adversary |
+| Manual validation before `/wf-pr` | — | — | — | **required** |
+
+`guided` is for teams that decided the guard never blocks: it warns, and both you and Claude see a reminder.
+Secrets are the exception, since a warning after a secret was read or committed is too late. To warn on secrets
+too, set `git.always_enforce` to `[]`.
 
 Fine-tuning:
-- `git.guard`: `enforce` / `warn` / `off`.
+- `git.guard`: `enforce` / `warn` / `off`. In `warn`, Claude and you both see the reminder (`git.notes.<op>`),
+  and ops in `git.always_enforce` keep their decision.
+- Committing checks what is staged: secret files, and added lines in high-confidence credential formats
+  (private keys, AWS, GitHub, Slack, OpenAI/Anthropic, Stripe live keys). Add `pragma: allowlist secret` to a
+  line that is a genuine placeholder. This is not a full secret scanner; keep the project's own.
 - `git.ops.<op>`: `allow` / `ask` / `block`, for each of `stage`, `commit`, `push`, `pr`, `merge`, `tag`, `release`,
-  `history`, `destructive` and `skip_hooks`.
+  `history`, `destructive` and `skip_hooks`, plus three non-git ops: `destructive_fs` (recursive deletes),
+  `secrets` (reading `.env`, private keys and credential files, through Bash or the Read tool) and
+  `remote_exec` (piping a downloaded script into a shell or interpreter).
 - `gate.mode`: `enforce` / `advisory` / `off`.
 - `gate.checks_required`, `gate.stale_review`, `gate.dirty_tree`, `gate.security_always_blocks`, thresholds and
   `critical_paths`.
@@ -108,6 +122,35 @@ Trade-offs of local mode:
 - After updating the harness in the main checkout, re-run `wf-new.sh` (or `uninstall.sh` + re-create) for existing worktrees.
 - `bootstrap.sh` checks that `git status` shows nothing from the harness.
 
+## Presets: a team's conventions in one flag
+
+`install.sh <repo> --preset <name>` merges a preset into `harness.json` once and records it as `"preset"`;
+re-running the installer never re-applies it over your later edits. Presets set conventions (branch names, base
+branch, commands, critical paths, docs, validation) and can pick a profile; profiles set strictness.
+
+The installer looks for `presets/local/<name>.json` first, then `presets/<name>.json`. **`presets/local/` is
+gitignored:** keep presets for your company, clients and projects there, so their names and conventions never
+reach this public repo. Start from the tracked example:
+
+```bash
+cp presets/example.json presets/local/acme.json      # edit: base branch, prefixes, commands, critical paths, notes
+bash install.sh ~/work/<repo> --preset acme --mode local
+.claude/harness/scripts/wf-new.sh invoice-export "Export invoices as CSV" --ticket ACME-123
+# -> branch feature/ACME-123-invoice-export from dev
+```
+
+`presets/example.json` sets:
+
+| Convention | Keys |
+|---|---|
+| `<type>/<ticket>-<description>` from `dev`, `hotfix` type, warn without `--ticket` | `branching` |
+| Project commands (`make lint/test/build`) | `commands` |
+| Code-owner areas reviewed at the critical threshold | `gate.critical_paths` |
+| ADRs drafted by `/wf-spec`; CHANGELOG checked and PR template filled by `/wf-pr` | `docs` |
+| `/wf-validate` evidence before `/wf-pr`; frozen task set for LLM/RAG changes | `profile: guided`, `validation` |
+| Guard warns and reminds; secrets enforced; push and merge printed for you to run | `profile: guided`, `git.notes` |
+| No release-please; warn if the repo lacks the PR template or ADR folder | `_install.release`, `_install.expects` |
+
 ## Install into a project
 
 ```bash
@@ -125,7 +168,7 @@ Then:
 1. Fill in the `commands` in `harness.json` (`lint`, `typecheck`, `test`, `stress`, `build`) and `gate.critical_paths`. Check `team` and `profile`.
 2. Review the harness files, commit them, and push. Worktrees only see committed files.
 3. On GitHub, go to Settings → Actions → General and allow Actions to create pull requests. Prefer squash merges.
-4. Pin `release-please-action` and `action-semantic-pull-request` to commit SHAs you have reviewed.
+4. The release workflows ship pinned to reviewed commit SHAs; review any bump before you merge it.
 
 Requirements: git, python3 ≥ 3.8 (stdlib only) and Claude Code. `gh` is needed only for `/wf-release`.
 
@@ -136,7 +179,7 @@ Pin installs to an **exact commit SHA**, not only a tag. Tags can be moved or re
 ```bash
 cd /path/to/project
 SHA=<40-char commit sha of the release you reviewed>
-curl -fsSL "https://raw.githubusercontent.com/temesgen5335/harness/$SHA/bootstrap.sh" | bash -s -- --ref v0.1.0 --sha "$SHA"
+curl -fsSL "https://raw.githubusercontent.com/temesgen5335/self-harness/$SHA/bootstrap.sh" | bash -s -- --ref v0.1.0 --sha "$SHA"
 # no trace in git (client or team repos): add --mode local
 # or, with a local clone:  ~/dev/harness/bootstrap.sh --ref v0.1.0 --sha "$SHA"
 ```
@@ -145,7 +188,7 @@ curl -fsSL "https://raw.githubusercontent.com/temesgen5335/harness/$SHA/bootstra
 - `--sha` makes bootstrap refuse to install if `--ref` resolves to any other commit.
 - Without `--sha`, bootstrap installs and prints the SHA to pin next time.
 - `.claude/harness/SOURCE_REF` records `<ref> <sha>`, so every project shows exactly which harness it runs.
-- To find a release's SHA: `git ls-remote https://github.com/temesgen5335/harness refs/tags/v0.1.0`.
+- To find a release's SHA: `git ls-remote https://github.com/temesgen5335/self-harness refs/tags/v0.1.0`.
   Check it against the GitHub release page before you pin it.
 
 `bootstrap.sh` does the rest:
@@ -163,6 +206,11 @@ Re-running it updates an existing install (`--force` is added automatically; `ha
 cd ../<repo>.worktrees/rate-limit && claude
 ```
 
+Small, low-risk change? Add `--track lite`: a short spec and two review lenses (correctness, security), no adversary.
+The work item upgrades itself to the standard track when the diff passes `tracks.lite.max_changed_lines` (150)
+or touches `gate.critical_paths`, dependency manifests or migrations (`tracks.lite.upgrade_paths`).
+`python3 .claude/harness/scripts/wf-track.py <slug>` shows the effective track and why; review and the gate both use it.
+
 | Step | Session | Command | Output |
 |---|---|---|---|
 | Investigate | fresh | `/wf-investigate rate-limit` | `10-investigation.md`: sourced facts, current versions, unknowns |
@@ -172,6 +220,8 @@ cd ../<repo>.worktrees/rate-limit && claude
 | Review | fresh, per round | `/wf-review rate-limit` | `R<n>.md`, `R<n>.findings.json`, `50-gate.md` |
 | Fix | build | `/wf-fix rate-limit` | Regression tests + fixes, `R<n>.response.md`, commit drafts |
 | Gate | any | `/wf-gate rate-limit` | PASS / BLOCK / ESCALATE (advisory or off when configured) |
+| PR | any | `/wf-pr rate-limit` | `pr.md`: title and the project's PR template filled from the artifacts, plus the exact `git push` / `gh pr create` commands for you to run |
+| Validate | any | `/wf-validate rate-limit` | `60-validation.md`: test cases per AC, evidence, defects, go / hold / go with accepted risk |
 | Publish | default branch | `/wf-release` | GO / NO-GO on the release-please PR |
 
 Other commands: `/wf-status` (all work items), `/wf-handoff` (compress state before `/clear`), `/wf-commit` (any time).
@@ -187,6 +237,8 @@ so the builder's reasoning doesn't bias it. The builder answers each finding in 
   and pauses for you at every commit point (headless sessions can't approve "ask" operations).
   The loop stops if a reviewer changes code, or if a review session writes no new round.
   `--manual` runs only review + gate. `--fix-session <id>` resumes your build session instead of starting a fresh one.
+  Each session's duration, cost, turns and refused tool calls are appended to `.work/<slug>/metrics.jsonl`;
+  `wf-metrics.py <slug> summary` totals them per phase. Session tools: `loop.review_tools` / `loop.fix_tools`.
 
 ## The risk gate
 
@@ -227,12 +279,18 @@ python3 -I tests/test_harness.py
 ```
 
 The tests cover the installer, the git-guard corpus (`tests/guard_corpus.tsv`, about 90 commands), gate cases,
-the commit-msg hook, `wf-new.sh`, and local mode (no trace, shared worktree artifacts, uninstall). Add a test for every bug fixed.
+the commit-msg hook, `wf-new.sh`, the lite track's upgrade rules, `wf-loop.sh` with a stand-in `claude`, and local mode (no trace, shared worktree artifacts, uninstall). Add a test for every bug fixed.
+
+Review quality is measured separately, with real (paid) headless reviews of seeded defects: see [evals/README.md](evals/README.md).
 
 ## Limits worth knowing
 
-- The git guard is a guardrail, not a sandbox. It parses shell commands (including `bash -c`, `$(…)`, `eval` and git global
-  options), but a determined process can still write to `.git` directly. Use Claude Code's sandbox for hard isolation.
-- Headless loop runs give the fix session Bash; the guard still applies. To be stricter, narrow `FIX_TOOLS` in `wf-loop.sh`.
+- The guard is a guardrail, not a sandbox. It parses shell commands (including `bash -c`, `$(…)`, `eval`, git global
+  options and git calls written inside `python -c` / `node -e` code), but a determined process - a script file, an
+  alias, writing to `.git` directly - can still get around it. For hard isolation, enable Claude Code's sandbox
+  (filesystem and network restrictions enforced by the OS), especially with the `strict` profile.
+- The guard does not scan file contents for secrets. Pair it with a secret scanner in your git hooks or CI.
+- Headless loop runs give the fix session Bash; the guard still applies, and its "ask" decisions are refused headless.
+  To be stricter, narrow `loop.fix_tools` in `harness.json` (for example `"Bash(npm test:*)"`).
 - Review cost grows with the number of lenses. For small changes use the `light` profile or trim `review.lenses`.
 - Monorepos: add packages to `release-please-config.json` `packages` and set `include-component-in-tag: true`.

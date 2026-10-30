@@ -2,7 +2,7 @@
 # One-shot onboarding: preflight checks, fetch a pinned harness version, install into the current repo.
 #
 #   Recommended (pinned to an exact commit you have reviewed):
-#   curl -fsSL https://raw.githubusercontent.com/temesgen5335/harness/<sha>/bootstrap.sh \
+#   curl -fsSL https://raw.githubusercontent.com/temesgen5335/self-harness/<sha>/bootstrap.sh \
 #     | bash -s -- --ref v0.1.0 --sha <sha> [install.sh options]
 #
 # Or from a local clone:  ~/dev/harness/bootstrap.sh --ref v0.1.0
@@ -15,7 +15,7 @@
 # --release-type, --default-branch, --no-release, --with-release, --no-agents-md, --force).
 set -euo pipefail
 
-HARNESS_REPO="${HARNESS_REPO:-https://github.com/temesgen5335/harness.git}"
+HARNESS_REPO="${HARNESS_REPO:-https://github.com/temesgen5335/self-harness.git}"
 HARNESS_HOME="${HARNESS_HOME:-$HOME/.local/share/claude-harness}"
 ref=""; sha=""; target=""; pass=()
 while [[ $# -gt 0 ]]; do case "$1" in
