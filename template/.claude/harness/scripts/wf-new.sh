@@ -1,26 +1,38 @@
 #!/usr/bin/env bash
 # Start a work item: branch + worktree + .work/<slug>/ from templates.
-# Usage: wf-new.sh <slug> "<one-line brief>" [--type feat|fix|chore|refactor|docs] [--track lite|standard] [--here]
+# Usage: wf-new.sh <slug> "<one-line brief>" [--type <type>] [--ticket <id>] [--track lite|standard] [--here]
+#   --type   a key of harness.json branching.prefixes (default feat); the branch is <prefix>/[<ticket>-]<slug>
+#   --ticket the tracker id, e.g. ACME-123 or 42 (branching.ticket "warn" warns when it is missing)
 #   --track  lite: small, low-risk change (two review lenses, no adversary); upgraded to standard
 #            automatically if the diff outgrows it (see wf-track.py). Default: standard.
 #   --here   use the current checkout instead of a new worktree
 set -euo pipefail
-usage() { echo "usage: wf-new.sh <slug> \"<one-line brief>\" [--type feat|fix|chore|refactor|docs] [--track lite|standard] [--here]" >&2; exit 3; }
+usage() { echo "usage: wf-new.sh <slug> \"<one-line brief>\" [--type <type>] [--ticket <id>] [--track lite|standard] [--here]" >&2; exit 3; }
 [[ $# -ge 2 ]] || usage
 slug="$1"; brief="$2"; shift 2
-type="feat"; here=0; track="standard"
+type="feat"; here=0; track="standard"; ticket=""
 while [[ $# -gt 0 ]]; do case "$1" in
-  --type) type="$2"; shift 2;; --here) here=1; shift;; --track) track="$2"; shift 2;;
+  --type) type="$2"; shift 2;; --here) here=1; shift;; --track) track="$2"; shift 2;; --ticket) ticket="$2"; shift 2;;
   *) echo "unknown arg: $1" >&2; usage;; esac; done
 [[ "$slug" =~ ^[a-z0-9][a-z0-9-]{1,40}$ ]] || { echo "slug must be kebab-case, 2-41 chars" >&2; exit 3; }
 [[ -n "$brief" ]] || usage
 [[ "$track" == lite || "$track" == standard ]] || { echo "--track must be lite or standard" >&2; exit 3; }
+[[ -z "$ticket" || "$ticket" =~ ^([A-Za-z][A-Za-z0-9]*-)?[0-9]+$ ]] || { echo "--ticket must look like ACME-123 or 42" >&2; exit 3; }
 
 root="$(git rev-parse --show-toplevel)"
 cfg="$root/.claude/harness/harness.json"
 H="$root/.claude/harness/scripts"
 [[ -f "$cfg" ]] || { echo "harness not installed (no $cfg)." >&2; exit 3; }
-work_dir="$(python3 "$H/hconfig.py" work_dir)"; default_branch="$(python3 "$H/hconfig.py" default_branch)"
+work_dir="$(python3 "$H/hconfig.py" work_dir)"
+default_branch="$(python3 "$H/hconfig.py" branching.base)"
+[[ -n "$default_branch" ]] || default_branch="$(python3 "$H/hconfig.py" default_branch)"
+prefix="$(python3 "$H/hconfig.py" branching.prefixes | python3 -c '
+import json, sys
+p, t = json.load(sys.stdin), sys.argv[1]
+print(p[t]) if t in p else sys.exit("unknown --type %s (branching.prefixes: %s)" % (t, " ".join(p)))' "$type")" || exit 3
+if [[ -z "$ticket" && "$(python3 "$H/hconfig.py" branching.ticket)" == warn ]]; then
+  echo "warning: no --ticket; this project names branches <type>/<ticket>-<description> (branching.ticket)" >&2
+fi
 mode="$(python3 "$H/hconfig.py" mode)"
 if [[ "$mode" == tracked ]]; then
   git -C "$root" ls-files --error-unmatch .claude/harness/harness.json >/dev/null 2>&1 \
@@ -41,7 +53,7 @@ sync_local_harness() {
 }
 
 # Tracked mode: base on origin/<default> only if it already contains the harness; otherwise the local branch.
-branch="$type/$slug"
+branch="$prefix/${ticket:+$ticket-}$slug"
 base_ref="$default_branch"
 if git -C "$root" remote get-url origin >/dev/null 2>&1 && git -C "$root" fetch --quiet origin "$default_branch" 2>/dev/null; then
   if [[ "$mode" == local ]] || git -C "$root" cat-file -e "origin/$default_branch:.claude/harness/harness.json" 2>/dev/null; then
@@ -85,7 +97,7 @@ open(dst, "w").write(t)
 PY
 done
 ( cd "$dir" && python3 .claude/harness/scripts/wf-state.py "$slug" set \
-    slug="$slug" branch="$branch" base="$base_sha" phase=new review_round=0 created="$today" worktree="$dir" track="$track" )
+    slug="$slug" branch="$branch" base="$base_sha" phase=new review_round=0 created="$today" worktree="$dir" track="$track" ticket="$ticket" type="$type" )
 trap - ERR
 
 cat << MSG

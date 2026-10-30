@@ -63,7 +63,7 @@ for ((i = 1; i <= max; i++)); do
   fi
   set +e; python3 "$H/gate.py" "$slug"; code=$?; set -e
   case $code in
-    0) python3 "$H/wf-metrics.py" "$slug" summary; echo "Gate done (PASS, or advisory/off mode) — a maintainer opens the PR, later /wf-release."; exit 0;;
+    0) python3 "$H/wf-metrics.py" "$slug" summary; echo "Gate done (PASS, or advisory/off mode) — /wf-pr drafts the PR for a maintainer to open."; exit 0;;
     2) echo "ESCALATE — stop and revisit the spec with a maintainer."; exit 2;;
     1) ;;
     *) echo "gate error ($code)"; exit "$code";;

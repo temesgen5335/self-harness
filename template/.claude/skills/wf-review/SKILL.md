@@ -16,7 +16,7 @@ You never edit source or tests. You write only under `.work/<slug>/`.
 
 ## Setup
 1. Slug from `$ARGUMENTS` or the branch's state.json. If uncommitted changes exist, note that they are NOT reviewed.
-2. `base` = state.json `base` (fall back to `git merge-base origin/<default_branch> HEAD`); `head` = `git rev-parse HEAD`.
+2. `base` = state.json `base` (fall back to `git merge-base origin/<branching.base or default_branch> HEAD`); `head` = `git rev-parse HEAD`.
 3. Round n = number of existing `R*.findings.json` + 1. Load the previous round's findings (if any) and
    `R<n-1>.response.md` from the builder (fixed / disputed / deferred per finding).
 4. Read the spec (§3, §4–§12) and `git log --oneline base..head`, `git diff --stat base...head`. Do not read the build log.

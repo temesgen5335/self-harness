@@ -73,6 +73,14 @@ Read the project before changing it. Detection is deterministic; interpretation 
 | G4 | One real pilot project run end to end (research plan §3) |
 | G5 | **Release:** create the GitHub repo, push, tag `v0.1.0`, publish the release with its SHA, and update the README install line |
 
+## Stage 5: company presets ✅ done (2026-10-30)
+| ID | Change | Acceptance |
+|---|---|---|
+| P1 | `branching.*` (base, type → prefix, ticket), `docs.*` (ADR dir, changelog, PR template), `validation.*` config | test |
+| P2 | `install.sh --preset <name>`; `presets/tenacious.json` (dev base, `feature/<ticket>-…`, run-target commands, code-owner critical paths, release-please off) | test |
+| P3 | `/wf-pr` (PR draft from the project template, commands printed, never run) and `/wf-validate` (AC test cases, evidence, go / hold) | manual (not yet run on a real repo) |
+| P4 | `/wf-spec` drafts an ADR in `docs.adr_dir` for architecture decisions | manual |
+
 ## Open questions
 - Local mode: should `wf-new.sh` offer a `--sync` to refresh the harness copy in existing worktrees after an update?
 - Should `strict` also add Claude Code `permissions.deny` rules as a second layer under the hook? (Currently the hook is the only layer, so `ask` works.)

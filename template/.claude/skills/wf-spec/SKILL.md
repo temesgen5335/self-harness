@@ -24,6 +24,10 @@ If the work outgrows lite (the planner's `reasons`), switch: `wf-state.py <slug>
 4. Acceptance criteria: testable, numbered AC-n, each mapped to tests.
 5. Tasks: T1..Tn, each about one commit, dependency-ordered, mapped to ACs, critical-path flagged.
 6. Section 14: decisions a maintainer must make, each with your recommendation.
+   If `docs.adr_dir` is set (`hconfig.py docs.adr_dir`) and the design makes an architecture decision (a new
+   dependency or service, a data model or API contract, a cross-cutting pattern), draft an ADR there: next free
+   number, the directory's template if it has one (e.g. `0000-template.md`), `Status: Proposed`, the alternatives
+   from step 2. Link it from the spec. It becomes `Accepted` with the spec's approval.
 7. Set `Status: Draft` and `python3 .claude/harness/scripts/wf-state.py <slug> set phase=specified`.
 
 ## Approval

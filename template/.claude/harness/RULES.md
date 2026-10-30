@@ -8,7 +8,8 @@ plan  -> `/wf-investigate` (fresh session) -> `/wf-spec` (fresh session, maintai
 build -> `/wf-build` one task at a time -> `/wf-commit` drafts -> commit (see Git)
 review-> `/wf-review` in a FRESH session per round -> `/wf-gate`
 fix   -> `/wf-fix` in the build session -> drafts -> commit -> next review round
-publish -> PR + merge (maintainer) -> release-please PR -> `/wf-release` go/no-go -> maintainer merges
+publish -> `/wf-pr` drafts the PR (maintainer pushes, opens, merges) -> `/wf-validate` before promotion when the
+           project validates releases -> release-please PR -> `/wf-release` go/no-go -> maintainer merges
 
 Never do two phases in one session. The only memory between sessions is `.work/<slug>/`.
 

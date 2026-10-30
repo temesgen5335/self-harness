@@ -1,0 +1,25 @@
+{
+  "_about": "Tenacious engineering standards (https://tenacious-engineering-standards.pages.dev/). Applied by install.sh --preset tenacious; keys starting with _ are install options, not config.",
+  "_install": {
+    "release": false,
+    "expects": ["scripts/run-target.sh", ".github/pull_request_template.md", "docs/adr"]
+  },
+  "branching": {
+    "base": "dev",
+    "prefixes": {"feat": "feature", "fix": "fix", "chore": "chore", "refactor": "refactor", "docs": "docs", "hotfix": "hotfix"},
+    "ticket": "warn"
+  },
+  "commands": {
+    "install": "make install",
+    "lint": "bash scripts/run-target.sh lint",
+    "test": "bash scripts/run-target.sh test",
+    "build": "bash scripts/run-target.sh build"
+  },
+  "gate": {
+    "critical_paths": ["**/auth/**", "**/payments/**", "**/billing/**", "**/security/**",
+                       "**/migrations/**", "**/alembic/**", "**/infra/**", "**/terraform/**", "**/*.tf",
+                       "**/.github/workflows/**", "**/prompts/**", "**/shared/**", "**/common/**"]
+  },
+  "docs": {"adr_dir": "docs/adr", "changelog": "CHANGELOG.md", "pr_template": ".github/pull_request_template.md"},
+  "validation": {"frozen_task_set": "evals/frozen-task-set/tasks.jsonl"}
+}

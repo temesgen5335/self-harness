@@ -511,6 +511,33 @@ class TestEvals(Base):
         self.assertEqual(s["caught"], 0)
 
 
+class TestPreset(Base):
+    def test_tenacious_preset_names_branches_from_dev_without_release_please(self):
+        repo = make_repo(self.tmp, "proj", "--preset", "tenacious")
+        self.assertFalse((repo / "release-please-config.json").exists())
+        cfg = json.loads(run(["python3", ".claude/harness/scripts/hconfig.py"], repo).stdout)
+        self.assertEqual(cfg["commands"]["test"], "bash scripts/run-target.sh test")
+        self.assertEqual(cfg["docs"]["adr_dir"], "docs/adr")
+        commit_all(repo)
+        run(["git", "branch", "dev"], repo)
+        r = run([".claude/harness/scripts/wf-new.sh", "invoice-export", "export", "--ticket", "ACME-12", "--here"], repo)
+        self.assertEqual(run(["git", "branch", "--show-current"], repo).stdout.strip(), "feature/ACME-12-invoice-export")
+        self.assertIn("base dev", r.stdout)
+        run(["git", "switch", "-q", "dev"], repo)
+        r = run([".claude/harness/scripts/wf-new.sh", "tidy", "tidy up", "--type", "chore", "--here"], repo)
+        self.assertIn("no --ticket", r.stderr)
+        self.assertEqual(run(["git", "branch", "--show-current"], repo).stdout.strip(), "chore/tidy")
+
+    def test_bad_type_ticket_and_preset_are_refused(self):
+        repo = make_repo(self.tmp)
+        commit_all(repo)
+        for args in (["--type", "feature"], ["--ticket", "ACME 12"]):
+            r = run([".claude/harness/scripts/wf-new.sh", "x1", "b", *args, "--here"], repo, check=False)
+            self.assertEqual(r.returncode, 3, (args, r.stderr))
+        r = run(["bash", str(HARNESS / "install.sh"), str(repo), "--preset", "nope"], repo, check=False)
+        self.assertEqual(r.returncode, 3)
+
+
 class TestLocalMode(Base):
     def setUp(self):
         super().setUp()

@@ -29,6 +29,17 @@ BASE = {
     "default_branch": "main",
     "team": {"lead": {"name": "", "email": ""}, "collaborators": []},
     "commands": {"install": "", "lint": "", "typecheck": "", "test": "", "stress": "", "build": ""},
+    # Work branches (wf-new.sh): <prefix>/[<ticket>-]<slug>, cut from `base` (empty = default_branch).
+    # ticket: "optional", or "warn" to warn when wf-new.sh gets no --ticket.
+    "branching": {
+        "base": "",
+        "prefixes": {"feat": "feat", "fix": "fix", "chore": "chore", "refactor": "refactor", "docs": "docs"},
+        "ticket": "optional",
+    },
+    # Project docs the workflow writes to when set: ADRs from /wf-spec, the changelog and PR body from /wf-pr.
+    "docs": {"adr_dir": "", "changelog": "", "pr_template": ".github/pull_request_template.md"},
+    # /wf-validate: where evidence goes is the work dir; a frozen task set is re-run for LLM/RAG changes.
+    "validation": {"frozen_task_set": ""},
     "git": {
         "guard": "enforce",              # enforce | warn | off
         "on_unparseable": BLOCK,         # what to do with a command the guard cannot parse

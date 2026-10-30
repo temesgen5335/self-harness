@@ -20,7 +20,7 @@ How strict the harness is (git policy and gate) is project config, from `strict`
                                                                      ▲                     │
                                                        /wf-fix ◄─────┤                     ▼
                                                      (response.md)   │ BLOCK      /wf-review (fresh session per round)
-                                                                     └──────────── gate.py ──► PASS ──► maintainer opens PR, merges
+                                                                     └──────────── gate.py ──► PASS ──► /wf-pr draft ──► maintainer opens PR, merges
                                                                                                          │
                                                                     release-please PR ◄──────────────────┘
                                                                     /wf-release go/no-go ──► maintainer merges release PR
@@ -112,6 +112,34 @@ Trade-offs of local mode:
 - After updating the harness in the main checkout, re-run `wf-new.sh` (or `uninstall.sh` + re-create) for existing worktrees.
 - `bootstrap.sh` checks that `git status` shows nothing from the harness.
 
+## Presets: a company's conventions in one flag
+
+`install.sh <repo> --preset <name>` merges `presets/<name>.json` into `harness.json` (re-run to re-apply; your
+other keys are kept). Presets set conventions; profiles still set strictness.
+
+`--preset tenacious` follows the [Tenacious engineering standards](https://tenacious-engineering-standards.pages.dev/):
+
+| Standard | What the preset sets |
+|---|---|
+| Branching: `<type>/<ticket>-<description>` from `dev` | `branching.base=dev`, `feat` → `feature/`, `hotfix` type, warns without `--ticket` |
+| CI/CD: `make` targets via the template | `commands` run `bash scripts/run-target.sh lint/test/build` |
+| Code Review: code-owner areas | `gate.critical_paths` adds billing, infra, Terraform, workflows, prompts, shared code |
+| Pull Requests: the repo's template, base `dev` | `/wf-pr` fills `.github/pull_request_template.md` and prints the commands |
+| Manual Testing: evidence before promotion; frozen task set | `/wf-validate`, `validation.frozen_task_set` |
+| Documentation: ADRs, CHANGELOG `[Unreleased]` | `docs.adr_dir=docs/adr` (drafted by `/wf-spec`), `docs.changelog` (checked by `/wf-pr`) |
+| Release: staging is the gate, release log in `docs/RELEASES.md` | release-please off (`/wf-release` does not apply) |
+
+```bash
+bash install.sh ~/work/<repo> --preset tenacious --mode local
+.claude/harness/scripts/wf-new.sh invoice-export "Export invoices as CSV" --ticket ACME-123
+# -> branch feature/ACME-123-invoice-export from dev
+```
+
+Use local mode on company repos: the harness is your workflow, not the team's, and leaves no trace in their git.
+It needs the repo to have adopted the project template (`scripts/run-target.sh`, the PR template, `docs/adr/`);
+the installer warns about anything missing. Hooks you run outside the repo (for example a
+company-level guard) run alongside this one; keep only one of them deciding on git commands.
+
 ## Install into a project
 
 ```bash
@@ -181,6 +209,8 @@ or touches `gate.critical_paths`, dependency manifests or migrations (`tracks.li
 | Review | fresh, per round | `/wf-review rate-limit` | `R<n>.md`, `R<n>.findings.json`, `50-gate.md` |
 | Fix | build | `/wf-fix rate-limit` | Regression tests + fixes, `R<n>.response.md`, commit drafts |
 | Gate | any | `/wf-gate rate-limit` | PASS / BLOCK / ESCALATE (advisory or off when configured) |
+| PR | any | `/wf-pr rate-limit` | `pr.md`: title and the project's PR template filled from the artifacts, plus the exact `git push` / `gh pr create` commands for you to run |
+| Validate | any | `/wf-validate rate-limit` | `60-validation.md`: test cases per AC, evidence, defects, go / hold / go with accepted risk |
 | Publish | default branch | `/wf-release` | GO / NO-GO on the release-please PR |
 
 Other commands: `/wf-status` (all work items), `/wf-handoff` (compress state before `/clear`), `/wf-commit` (any time).
