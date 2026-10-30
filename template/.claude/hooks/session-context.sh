@@ -23,6 +23,11 @@ nxt = {"new": "/wf-investigate", "investigated": "/wf-spec (fresh session)",
        "passed": "/wf-pr drafts the PR; /wf-validate before promotion; after merge /wf-release",
        "validated": "/wf-pr, or promote", "validation-hold": "/wf-fix the validation defects, then /wf-validate",
        "released": "nothing"}
+if cfg.get("validation", {}).get("required"):
+    nxt["passed"] = "/wf-validate (manual validation is required before the PR), then /wf-pr"
+if cfg["git"]["guard"] == "warn":
+    kept = ", ".join(cfg["git"].get("always_enforce", [])) or "nothing"
+    print(f"[harness] guard warns and reminds; still enforced: {kept}")
 for sp in (root / wd).glob("*/state.json"):
     s = json.loads(sp.read_text())
     if s.get("branch") != branch:

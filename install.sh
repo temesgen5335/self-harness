@@ -6,7 +6,8 @@
 #                                     settings.local.json, commit-msg hook in the git dir, .work shared across
 #                                     worktrees in the git dir, CLAUDE.md/AGENTS.md/.gitignore untouched.
 #                                     Fixed at first install; switch by running uninstall.sh first.
-#   --profile strict|standard|light   initial profile (edit harness.json later)
+#   --profile strict|standard|light|tenacious   initial profile (edit harness.json later); a profile with a
+#                                     same-named preset (tenacious) applies that preset too
 #   --preset <name>                   merge presets/<name>.json into harness.json once (e.g. tenacious),
 #                                     recorded as "preset"; its _install options set defaults such as --no-release
 #   --lead "Name <email>"             team lead (default: git user.name/user.email of whoever runs this)
@@ -31,6 +32,7 @@ while [[ $# -gt 0 ]]; do case "$1" in
 [[ -z "$mode" || "$mode" == tracked || "$mode" == local ]] || { echo "--mode must be tracked or local" >&2; exit 3; }
 [[ -n "$target" && ( -d "$target/.git" || -f "$target/.git" ) ]] || { echo "target must be a git repo root" >&2; exit 3; }
 command -v python3 >/dev/null || { echo "python3 is required" >&2; exit 3; }
+[[ -z "$preset" && -n "$profile" && -f "$(dirname "$SRC")/presets/$profile.json" ]] && preset="$profile"
 preset_file=""
 if [[ -n "$preset" ]]; then
   preset_file="$(dirname "$SRC")/presets/$preset.json"
@@ -104,10 +106,22 @@ if preset_file:
         merge(c, pre); c["preset"] = name
         diff = [k for k, v in leaves(pre) if before.get(k) != v]
         changed.append(f"preset={name} (set {', '.join(diff) or 'nothing new'})")
+# Earlier templates pinned these profile-governed keys, which silently overrode every profile.
+# Drop them when they still hold those old defaults; edited values are kept.
+OLD = {("git", "guard"): "enforce", ("git", "ops"): {"stage": "ask", "commit": "ask", "push": "ask", "pr": "ask"},
+       ("gate", "mode"): "enforce",
+       ("review", "lenses"): ["correctness", "security", "scale", "operability", "design", "experience"],
+       ("review", "adversary"): True}
+for (sec, key), val in OLD.items():
+    if isinstance(c.get(sec), dict) and c[sec].get(key) == val:
+        del c[sec][key]; changed.append(f"removed pinned default {sec}.{key}")
+        if not c[sec]: del c[sec]
 if c.get("mode") != mode: c["mode"] = mode; changed.append(f"mode={mode}")
 if branch: c["default_branch"] = branch; changed.append(f"default_branch={branch}")
 if profile:
-    if profile not in ("strict", "standard", "light"): sys.exit(f"unknown profile: {profile}")
+    sys.path.insert(0, ".claude/harness/scripts")
+    from hconfig import PROFILES
+    if profile not in PROFILES: sys.exit(f"unknown profile: {profile} (use one of: {', '.join(PROFILES)})")
     c["profile"] = profile; changed.append(f"profile={profile}")
 team = c.setdefault("team", {"lead": {"name": "", "email": ""}, "collaborators": []})
 if lead: team["lead"] = person(lead); changed.append(f"lead={lead}")
@@ -249,7 +263,7 @@ if [[ -n "$preset_file" ]]; then
 fi
 echo "Next:"
 echo "  1. Fill .claude/harness/harness.json \"commands\" (lint, typecheck, test, stress, build) and gate.critical_paths;"
-echo "     check \"team\" and \"profile\" (strict | standard | light)."
+echo "     check \"team\" and \"profile\" (strict | standard | light | tenacious)."
 if [[ $mode == tracked ]]; then
   echo "  2. Review and commit the harness files yourself (worktrees only see committed files), then push:"
   echo "       git add .claude .githooks CLAUDE.md AGENTS.md .gitignore release-please-config.json .release-please-manifest.json .github"

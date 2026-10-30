@@ -65,19 +65,29 @@ only they approve specs, accept waivers and ask for git writes.
 
 Set `"profile"` in `harness.json`. A profile only sets defaults; any key you set yourself overrides it.
 
-| | `strict` | `standard` (default) | `light` |
-|---|---|---|---|
-| Stage / commit / push / open PR | block (draft only) | **ask**: maintainer confirms each command | ask |
-| Merge, tag, release, history rewrite, destructive, `--no-verify` | block | block | block |
-| Read a secret file (`.env`, keys), pipe a download into a shell | block | **ask** | ask |
-| Recursive delete (`rm -r`, `find -delete`) | ask | ask | ask |
-| Gate mode | enforce | enforce | **advisory** (reports, doesn't stop) |
-| Thresholds (default / critical) | 3% / 0.5% | 5% / 1% | 5% / 1% |
-| Stale review, dirty tree | block | block | warn |
-| Lenses | all 6 + adversary | all 6 + adversary | correctness + security |
+| | `strict` | `standard` (default) | `light` | `tenacious` |
+|---|---|---|---|---|
+| Stage / commit / push / open PR | block (draft only) | **ask**: maintainer confirms each command | ask | **warn + reminder** (push: "print the command, the user runs it") |
+| Merge, tag, release, history rewrite, destructive, `--no-verify` | block | block | block | warn + reminder |
+| Read or commit a secret (`.env`, keys, credential-like values) | block | **ask** | ask | **block** (still enforced) |
+| Pipe a download into a shell | block | ask | ask | warn |
+| Recursive delete (`rm -r`, `find -delete`) | ask | ask | ask | warn |
+| Gate mode | enforce | enforce | **advisory** (reports, doesn't stop) | enforce |
+| Thresholds (default / critical) | 3% / 0.5% | 5% / 1% | 5% / 1% | 5% / 1% |
+| Stale review, dirty tree | block | block | warn | block |
+| Lenses | all 6 + adversary | all 6 + adversary | correctness + security | all 6 + adversary |
+| Manual validation before `/wf-pr` | — | — | — | **required** |
+
+`tenacious` also applies `presets/tenacious.json` (see Presets). Its guard warns because the Tenacious team
+decided the guard never blocks; secrets are the exception, since a warning after a secret was read or committed
+is too late. To warn on secrets too, set `git.always_enforce` to `[]`.
 
 Fine-tuning:
-- `git.guard`: `enforce` / `warn` / `off`.
+- `git.guard`: `enforce` / `warn` / `off`. In `warn`, Claude and you both see the reminder (`git.notes.<op>`),
+  and ops in `git.always_enforce` keep their decision.
+- Committing checks what is staged: secret files, and added lines in high-confidence credential formats
+  (private keys, AWS, GitHub, Slack, OpenAI/Anthropic, Stripe live keys). Add `pragma: allowlist secret` to a
+  line that is a genuine placeholder. This is not a full secret scanner; keep the project's own.
 - `git.ops.<op>`: `allow` / `ask` / `block`, for each of `stage`, `commit`, `push`, `pr`, `merge`, `tag`, `release`,
   `history`, `destructive` and `skip_hooks`, plus three non-git ops: `destructive_fs` (recursive deletes),
   `secrets` (reading `.env`, private keys and credential files, through Bash or the Read tool) and
@@ -116,7 +126,7 @@ Trade-offs of local mode:
 
 `install.sh <repo> --preset <name>` merges `presets/<name>.json` into `harness.json` once and records it as
 `"preset"`; re-running the installer never re-applies it over your later edits. Presets set conventions;
-profiles still set strictness.
+profiles set strictness. `--profile tenacious` applies both.
 
 `--preset tenacious` follows the [Tenacious engineering standards](https://tenacious-engineering-standards.pages.dev/):
 
@@ -126,12 +136,14 @@ profiles still set strictness.
 | CI/CD: `make` targets via the template | `commands` run `bash scripts/run-target.sh lint/test/build` |
 | Code Review: code-owner areas | `gate.critical_paths` adds billing, infra, Terraform, workflows, prompts, shared code |
 | Pull Requests: the repo's template, base `dev` | `/wf-pr` fills `.github/pull_request_template.md` and prints the commands |
-| Manual Testing: evidence before promotion; frozen task set | `/wf-validate`, `validation.frozen_task_set` |
+| Manual Testing: evidence before promotion; frozen task set | `/wf-validate` required before `/wf-pr` (`validation.required`), `validation.frozen_task_set` |
+| Key Management: never read, print or commit secrets | secrets enforced by the guard (reads, staging, credential-like values in commits) |
+| Guard warns, never blocks (team decision) | `git.guard=warn` with reminders; push and merge are printed for you to run |
 | Documentation: ADRs, CHANGELOG `[Unreleased]` | `docs.adr_dir=docs/adr` (drafted by `/wf-spec`), `docs.changelog` (checked by `/wf-pr`) |
 | Release: staging is the gate, release log in `docs/RELEASES.md` | release-please off (`/wf-release` does not apply) |
 
 ```bash
-bash install.sh ~/work/<repo> --preset tenacious --mode local
+bash install.sh ~/work/<repo> --profile tenacious --mode local
 .claude/harness/scripts/wf-new.sh invoice-export "Export invoices as CSV" --ticket ACME-123
 # -> branch feature/ACME-123-invoice-export from dev
 ```

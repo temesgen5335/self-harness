@@ -13,7 +13,11 @@ Config: !`python3 .claude/harness/scripts/hconfig.py docs`
 1. Slug from `$ARGUMENTS` or the branch's state.json. `python3 .claude/harness/scripts/gate.py <slug> --no-write`
    must PASS for this head; otherwise name the blocking findings and stop.
 2. No uncommitted code (`git status --porcelain`, ignoring the work dir).
-3. Base = harness.json `branching.base`, else `default_branch`. Diff size: `git diff --shortstat origin/<base>...HEAD`
+3. If `validation.required` is true (`hconfig.py validation.required`): `.work/<slug>/60-validation.md` must
+   record `go` or `go with accepted risk`. If it does not, say "manual validation is required before the PR —
+   run /wf-validate <slug>" and stop; draft anyway only if the maintainer says so, and then the Testing section
+   states "Manual validation: pending".
+4. Base = harness.json `branching.base`, else `default_branch`. Diff size: `git diff --shortstat origin/<base>...HEAD`
    (the local `<base>` only when there is no remote);
    over ~400 changed lines, say so and suggest how to split.
 
@@ -22,7 +26,7 @@ Read the spec (§1, §4, §11, §12), `git log --oneline <base>..HEAD`, the late
 `.work/<slug>/60-validation.md`. Do not read the build log.
 - **Title:** Conventional Commit, ≤ 72 chars, the main change (it becomes the squash commit).
 - **Body:** the project's PR template (`docs.pr_template`) with every section filled from those artifacts — never
-  left as template comments. Without a template use: What / Why / How / Testing / Risk and rollback.
+  left as template comments. Without a template use: What / Why / How / Testing / Screenshots / Risk and rollback.
   - Why: the ticket (state.json `ticket`, e.g. "Closes ACME-123") and the problem.
   - How: decisions and trade-offs from the spec, not a restatement of the diff. Link any ADR it created.
   - Testing: commands the review ran and their results, AC → test mapping, validation evidence if recorded.

@@ -8,6 +8,7 @@ Profiles set defaults only; any key in harness.json overrides them.
   strict   : Claude never stages/commits/pushes; gate enforces with tighter limits
   standard : git writes need explicit approval (ask); gate enforces           (default)
   light    : git writes need approval; gate is advisory; two lenses, no adversary
+  tenacious: Tenacious standards; the guard warns and reminds (secrets stay enforced); validation before PR
 """
 from __future__ import annotations
 
@@ -39,13 +40,16 @@ BASE = {
     # Project docs the workflow writes to when set: ADRs from /wf-spec, the changelog and PR body from /wf-pr.
     "docs": {"adr_dir": "", "changelog": "", "pr_template": ".github/pull_request_template.md"},
     # /wf-validate: where evidence goes is the work dir; a frozen task set is re-run for LLM/RAG changes.
-    "validation": {"frozen_task_set": ""},
+    # required: /wf-pr asks for a recorded /wf-validate result (go / go with accepted risk) first.
+    "validation": {"frozen_task_set": "", "required": False},
     "git": {
         "guard": "enforce",              # enforce | warn | off
         "on_unparseable": BLOCK,         # what to do with a command the guard cannot parse
         "ops": {"stage": ASK, "commit": ASK, "push": ASK, "pr": ASK, "merge": BLOCK, "tag": BLOCK,
                 "release": BLOCK, "history": BLOCK, "destructive": BLOCK, "skip_hooks": BLOCK,
                 "destructive_fs": ASK, "secrets": ASK, "remote_exec": ASK},
+        "always_enforce": [],            # ops that keep their decision when guard is "warn"
+        "notes": {},                     # op -> reminder added to warn-mode messages
     },
     "gate": {
         "mode": "enforce",               # enforce | advisory | off
@@ -95,6 +99,30 @@ PROFILES = {
                 "ops": {"stage": BLOCK, "commit": BLOCK, "push": BLOCK, "pr": BLOCK,
                         "secrets": BLOCK, "remote_exec": BLOCK}},
         "gate": {"default_threshold": 0.03, "critical_threshold": 0.005, "max_review_rounds": 3},
+    },
+    # Tenacious engineering standards: the guard warns and reminds (team decision), except for secrets,
+    # which stay enforced because a warning after a secret was read is too late. Conventions come from
+    # presets/tenacious.json, which install.sh applies with --profile tenacious.
+    "tenacious": {
+        "git": {
+            "guard": "warn",
+            "on_unparseable": ASK,
+            "always_enforce": ["secrets"],
+            "ops": {"stage": ALLOW, "commit": ASK, "push": BLOCK, "pr": ASK, "merge": BLOCK,
+                    "secrets": BLOCK, "remote_exec": ASK},
+            "notes": {
+                "commit": "Commit at a natural completion point; no Co-Authored-By or attribution; tell the user the hash, message and files.",
+                "push": "Push is the user's: print the exact git push command and wait for them to run it.",
+                "merge": "Merging is the user's: print the exact command and wait.",
+                "pr": "Draft the PR with /wf-pr (Tenacious template, base dev, never --fill) and print gh pr create for the user.",
+                "skip_hooks": "Never bypass hooks (--no-verify, core.hooksPath): fix what the hook found.",
+                "history": "Rewrites history: only when the user asked for exactly this; never on dev/staging/production.",
+                "destructive": "Discards work: only when the user asked for exactly this.",
+                "destructive_fs": "Recursive delete: check the target first.",
+                "remote_exec": "Piping a download into a shell: pin and inspect it instead.",
+            },
+        },
+        "validation": {"required": True},
     },
     "light": {
         "git": {"on_unparseable": ASK},

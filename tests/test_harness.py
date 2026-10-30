@@ -205,7 +205,7 @@ class TestGate(Base):
         self.head = run(["git", "rev-parse", "HEAD"], self.repo).stdout.strip()
         self.rdir = self.repo / ".work/x/40-reviews"
         self.rdir.mkdir(parents=True)
-        self.lenses = json.loads((self.repo / ".claude/harness/harness.json").read_text())["review"]["lenses"]
+        self.lenses = json.loads(run(["python3", ".claude/harness/scripts/hconfig.py", "review.lenses"], self.repo).stdout)
 
     def review(self, n=1, findings=(), **over):
         data = {"round": n, "head": self.head, "checks": {"test": "pass"},
@@ -335,8 +335,7 @@ class TestGate(Base):
 
     def lite(self, files: dict) -> list:
         """Start a lite work item at the current head, commit `files`, and review with the lite lenses only."""
-        cfg = json.loads((self.repo / ".claude/harness/harness.json").read_text())
-        lite = {"lenses": ["correctness", "security"], "adversary": False, **cfg.get("tracks", {}).get("lite", {})}
+        lite = json.loads(run(["python3", ".claude/harness/scripts/hconfig.py", "tracks.lite"], self.repo).stdout)
         (self.repo / ".work/x/state.json").write_text(json.dumps({"slug": "x", "base": self.head, "track": "lite"}))
         for name, text in files.items():
             p = self.repo / name
@@ -450,7 +449,7 @@ args = sys.argv[1:]
 pathlib.Path(os.environ["FAKE_ARGS"]).write_text(json.dumps(args))
 if "/wf-review x" in args:
     head = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
-    cfg = json.loads(pathlib.Path(".claude/harness/harness.json").read_text())
+    cfg = json.loads(subprocess.run(["python3", ".claude/harness/scripts/hconfig.py"], capture_output=True, text=True).stdout)
     rdir = pathlib.Path(".work/x/40-reviews"); rdir.mkdir(parents=True, exist_ok=True)
     (rdir / "R1.findings.json").write_text(json.dumps({"round": 1, "head": head, "checks": {"test": "pass"},
         "lenses_run": cfg["review"]["lenses"], "adversary_run": True, "findings": []}))
@@ -493,7 +492,7 @@ FAKE_REVIEWER = r"""#!/usr/bin/env python3
 import json, os, pathlib, subprocess, sys
 slug = sys.argv[sys.argv.index("-p") + 1].split()[1]
 head = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
-cfg = json.loads(pathlib.Path(".claude/harness/harness.json").read_text())
+cfg = json.loads(subprocess.run(["python3", ".claude/harness/scripts/hconfig.py"], capture_output=True, text=True).stdout)
 finding = {"id": "F-001", "title": os.environ["FAKE_TITLE"], "lens": "security", "class": "security-exploitable",
            "status": "open", "p_trigger": 0.8, "p_visible": 0.5, "evidence": "executed-repro",
            "files": [os.environ["FAKE_FILE"] + ":3"]}
@@ -579,6 +578,62 @@ class TestPreset(Base):
             self.assertEqual(r.returncode, 3, (args, r.stderr))
         r = run(["bash", str(HARNESS / "install.sh"), str(repo), "--preset", "nope"], repo, check=False)
         self.assertEqual(r.returncode, 3)
+
+
+class TestProfiles(Base):
+    def test_profile_defaults_are_not_pinned_by_the_template(self):
+        repo = make_repo(self.tmp, "proj", "--profile", "light")
+        cfg = json.loads(run(["python3", ".claude/harness/scripts/hconfig.py"], repo).stdout)
+        self.assertEqual((cfg["gate"]["mode"], cfg["review"]["adversary"]), ("advisory", False))
+
+    def test_upgrade_drops_old_pinned_defaults_but_keeps_edits(self):
+        repo = make_repo(self.tmp, "proj", "--profile", "light")
+        set_cfg(repo, git__guard="enforce", gate__mode="enforce", review__adversary=False)
+        run(["bash", str(HARNESS / "install.sh"), str(repo)], repo)
+        user = json.loads((repo / ".claude/harness/harness.json").read_text())
+        self.assertNotIn("git", user)
+        self.assertNotIn("mode", user["gate"])
+        self.assertIs(user["review"]["adversary"], False)  # not the old default: an edit, kept
+
+
+class TestTenaciousProfile(Base):
+    def setUp(self):
+        super().setUp()
+        self.repo = make_repo(self.tmp, "proj", "--profile", "tenacious")
+        commit_all(self.repo)
+
+    def test_profile_applies_the_preset(self):
+        cfg = json.loads(run(["python3", ".claude/harness/scripts/hconfig.py"], self.repo).stdout)
+        self.assertEqual((cfg["profile"], cfg["preset"], cfg["branching"]["base"], cfg["git"]["guard"]),
+                         ("tenacious", "tenacious", "dev", "warn"))
+        self.assertTrue(cfg["validation"]["required"])
+
+    def test_git_operations_warn_with_a_reminder(self):
+        for cmd, note in (("git push origin feature/x", "Push is the user's"), ("gh pr merge 3", "Merging is the user's"),
+                          ("git commit -m 'feat: x'", "no Co-Authored-By"), ("git commit --no-verify -m x", "Never bypass hooks")):
+            with self.subTest(cmd):
+                payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}})
+                r = run([str(self.repo / ".claude/hooks/guard-git.sh")], self.repo, check=False, inp=payload,
+                        env={**ENV, "CLAUDE_PROJECT_DIR": str(self.repo)})
+                self.assertEqual(r.returncode, 0, r.stderr)
+                out = json.loads(r.stdout)
+                self.assertIn(note, out["hookSpecificOutput"]["additionalContext"])
+                self.assertNotIn("permissionDecision", out["hookSpecificOutput"])
+
+    def test_secrets_stay_enforced(self):
+        (self.repo / ".env").write_text("TOKEN=x\n")
+        for cmd in ("cat .env", "git add .env", "git add -A", "grep TOKEN .env"):
+            with self.subTest(cmd):
+                self.assertEqual(guard(self.repo, cmd), "block")
+
+    def test_commit_with_a_staged_credential_is_blocked(self):
+        key = "AKIA" + "ABCDEFGHIJKLMNOP"
+        (self.repo / "config.py").write_text(f"KEY = '{key}'\n")
+        run(["git", "add", "config.py"], self.repo)
+        self.assertEqual(guard(self.repo, "git commit -m 'feat: config'"), "block")
+        (self.repo / "config.py").write_text(f"KEY = '{key}'  # pragma: allowlist secret\n")
+        run(["git", "add", "config.py"], self.repo)
+        self.assertEqual(guard(self.repo, "git commit -m 'feat: config'"), "warn")
 
 
 class TestLocalMode(Base):
