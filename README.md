@@ -240,6 +240,8 @@ python3 -I tests/test_harness.py
 The tests cover the installer, the git-guard corpus (`tests/guard_corpus.tsv`, about 90 commands), gate cases,
 the commit-msg hook, `wf-new.sh`, the lite track's upgrade rules, `wf-loop.sh` with a stand-in `claude`, and local mode (no trace, shared worktree artifacts, uninstall). Add a test for every bug fixed.
 
+Review quality is measured separately, with real (paid) headless reviews of seeded defects: see [evals/README.md](evals/README.md).
+
 ## Limits worth knowing
 
 - The guard is a guardrail, not a sandbox. It parses shell commands (including `bash -c`, `$(…)`, `eval`, git global

@@ -1,0 +1,6 @@
+{
+  "brief": "Look up a user by name for the support console",
+  "acs": ["AC-1: find_user returns the user's row for an existing name", "AC-2: find_user returns None for an unknown name"],
+  "defect": {"title": "SQL injection: the name is formatted into the query", "file": "app/users.py",
+             "lenses": ["security"], "keywords": ["inject", "sql", "parameter", "f-string", "interpolat"]}
+}

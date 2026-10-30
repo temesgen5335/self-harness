@@ -67,9 +67,9 @@ Read the project before changing it. Detection is deterministic; interpretation 
 ## Stage 4: measured quality, then release
 | ID | Change |
 |---|---|
-| G1 | `evals/`: fixture repos with seeded defects (injection, race, missing AC test, unbounded query, swallowed error); headless `/wf-review` catch rate per lens |
-| G2 | Gate consistency test: the same diff reviewed 3×; report how much the findings and exposures vary |
-| G3 | CI for the harness repo (macOS + Ubuntu, Python 3.8 + 3.12) running `tests/` |
+| G1 | **Built, not yet run** (`evals/run_evals.py`, 5 seeded cases + 1 clean control; scoring unit-tested with a stand-in `claude`). `evals/`: fixture repos with seeded defects (injection, race, missing AC test, unbounded query, swallowed error); headless `/wf-review` catch rate per lens |
+| G2 | **Built, not yet run** (`run_evals.py --runs 3`: catch rate, verdict agreement, exposure range). Gate consistency test: the same diff reviewed 3×; report how much the findings and exposures vary |
+| G3 | **Done** (`.github/workflows/test.yml`). CI for the harness repo (macOS + Ubuntu, Python 3.8 + 3.12) running `tests/` |
 | G4 | One real pilot project run end to end (research plan §3) |
 | G5 | **Release:** create the GitHub repo, push, tag `v0.1.0`, publish the release with its SHA, and update the README install line |
 

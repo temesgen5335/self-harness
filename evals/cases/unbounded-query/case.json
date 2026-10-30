@@ -1,0 +1,6 @@
+{
+  "brief": "Orders page: list a tenant's orders, newest first. The largest tenants have about 5 million orders; the page shows 50 at a time.",
+  "acs": ["AC-1: only the tenant's own orders are listed", "AC-2: newest first", "AC-3: the page shows 50 orders at a time"],
+  "defect": {"title": "Unbounded query loads every order of the tenant", "file": "app/orders.py",
+             "lenses": ["scale", "correctness"], "keywords": ["unbounded", "paginat", "limit", "memory", "all orders", "all rows"]}
+}

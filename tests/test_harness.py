@@ -468,6 +468,49 @@ class TestLoop(Base):
         self.assertFalse(json.loads((repo / ".work/x/metrics.jsonl").read_text())["parsed"])
 
 
+FAKE_REVIEWER = r"""#!/usr/bin/env python3
+# Stand-in for a headless /wf-review: writes one round whose single finding is FAKE_TITLE on FAKE_FILE.
+import json, os, pathlib, subprocess, sys
+slug = sys.argv[sys.argv.index("-p") + 1].split()[1]
+head = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+cfg = json.loads(pathlib.Path(".claude/harness/harness.json").read_text())
+finding = {"id": "F-001", "title": os.environ["FAKE_TITLE"], "lens": "security", "class": "security",
+           "status": "open", "p_trigger": 0.8, "p_visible": 0.5, "evidence": "executed-repro",
+           "files": [os.environ["FAKE_FILE"] + ":3"]}
+rdir = pathlib.Path(f".work/{slug}/40-reviews"); rdir.mkdir(parents=True, exist_ok=True)
+(rdir / "R1.findings.json").write_text(json.dumps({"round": 1, "head": head, "checks": {"test": "pass"},
+    "lenses_run": cfg["review"]["lenses"], "adversary_run": True, "findings": [finding]}))
+print(json.dumps({"result": "done", "total_cost_usd": 0.5, "num_turns": 3}))
+"""
+
+
+class TestEvals(Base):
+    RUNNER = HARNESS / "evals/run_evals.py"
+
+    def test_fixtures_build_and_pass_their_tests(self):
+        r = run(["python3", "-I", str(self.RUNNER), "--dry-run"], self.tmp, check=False)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def evaluate(self, title, file):
+        bindir = self.tmp / "bin"; bindir.mkdir(exist_ok=True)
+        (bindir / "claude").write_text(FAKE_REVIEWER); (bindir / "claude").chmod(0o755)
+        out = self.tmp / f"results-{len(title)}"
+        env = {**ENV, "PATH": f"{bindir}:{ENV['PATH']}", "FAKE_TITLE": title, "FAKE_FILE": file}
+        r = run(["python3", "-I", str(self.RUNNER), "--case", "sql-injection", "--runs", "2", "--out", str(out)],
+                self.tmp, check=False, env=env)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        return json.loads(next(out.glob("*.json")).read_text())["cases"][0]["summary"]
+
+    def test_scores_a_caught_defect(self):
+        s = self.evaluate("SQL injection in find_user", "app/users.py")
+        self.assertEqual((s["caught"], s["right_lens"], s["blocked"], s["runs"]), (2, 2, 2, 2))
+        self.assertEqual((s["verdict_agreement"], s["exposure_range"], s["cost_usd"]), (1.0, [0.4, 0.4], 1.0))
+
+    def test_keyword_on_the_wrong_file_is_not_a_catch(self):
+        s = self.evaluate("SQL injection risk", "app/db.py")
+        self.assertEqual(s["caught"], 0)
+
+
 class TestLocalMode(Base):
     def setUp(self):
         super().setUp()

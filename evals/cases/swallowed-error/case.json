@@ -1,0 +1,6 @@
+{
+  "brief": "Charge orders through the payment gateway",
+  "acs": ["AC-1: charge() calls the gateway with the order and amount", "AC-2: charge() returns True only when the gateway took the money"],
+  "defect": {"title": "Gateway errors are swallowed and reported as success", "file": "app/payments.py",
+             "lenses": ["correctness", "operability"], "keywords": ["swallow", "silent", "except", "ignored", "returns true"]}
+}

@@ -1,0 +1,6 @@
+{
+  "brief": "Apply promotion discounts to order totals",
+  "acs": ["AC-1: a discount reduces the total by that fraction", "AC-2: discounts are capped at 50%"],
+  "defect": {"title": "AC-2 (50% cap) has no test", "file": "",
+             "lenses": ["correctness", "design"], "keywords": ["ac-2", "cap", "50%", "max_discount"]}
+}
