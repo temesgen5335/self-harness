@@ -125,7 +125,7 @@ Then:
 1. Fill in the `commands` in `harness.json` (`lint`, `typecheck`, `test`, `stress`, `build`) and `gate.critical_paths`. Check `team` and `profile`.
 2. Review the harness files, commit them, and push. Worktrees only see committed files.
 3. On GitHub, go to Settings → Actions → General and allow Actions to create pull requests. Prefer squash merges.
-4. Pin `release-please-action` and `action-semantic-pull-request` to commit SHAs you have reviewed.
+4. The release workflows ship pinned to reviewed commit SHAs; review any bump before you merge it.
 
 Requirements: git, python3 ≥ 3.8 (stdlib only) and Claude Code. `gh` is needed only for `/wf-release`.
 
@@ -136,7 +136,7 @@ Pin installs to an **exact commit SHA**, not only a tag. Tags can be moved or re
 ```bash
 cd /path/to/project
 SHA=<40-char commit sha of the release you reviewed>
-curl -fsSL "https://raw.githubusercontent.com/temesgen5335/harness/$SHA/bootstrap.sh" | bash -s -- --ref v0.1.0 --sha "$SHA"
+curl -fsSL "https://raw.githubusercontent.com/temesgen5335/self-harness/$SHA/bootstrap.sh" | bash -s -- --ref v0.1.0 --sha "$SHA"
 # no trace in git (client or team repos): add --mode local
 # or, with a local clone:  ~/dev/harness/bootstrap.sh --ref v0.1.0 --sha "$SHA"
 ```
@@ -145,7 +145,7 @@ curl -fsSL "https://raw.githubusercontent.com/temesgen5335/harness/$SHA/bootstra
 - `--sha` makes bootstrap refuse to install if `--ref` resolves to any other commit.
 - Without `--sha`, bootstrap installs and prints the SHA to pin next time.
 - `.claude/harness/SOURCE_REF` records `<ref> <sha>`, so every project shows exactly which harness it runs.
-- To find a release's SHA: `git ls-remote https://github.com/temesgen5335/harness refs/tags/v0.1.0`.
+- To find a release's SHA: `git ls-remote https://github.com/temesgen5335/self-harness refs/tags/v0.1.0`.
   Check it against the GitHub release page before you pin it.
 
 `bootstrap.sh` does the rest:

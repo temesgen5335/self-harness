@@ -1,0 +1,7 @@
+version: 2
+updates:
+  # Keeps the pinned action SHAs (CI here and the release templates) current.
+  - package-ecosystem: "github-actions"
+    directories: ["/", "/template/release"]
+    schedule: { interval: "weekly" }
+    cooldown: { default-days: 7 }

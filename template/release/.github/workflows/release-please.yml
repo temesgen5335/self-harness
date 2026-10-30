@@ -9,8 +9,8 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     steps:
-      # Pin to a full commit SHA of a release you have reviewed (supply-chain hygiene).
-      - uses: googleapis/release-please-action@v4
+      # Pinned to a reviewed commit SHA (supply-chain hygiene); Dependabot can bump it.
+      - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json

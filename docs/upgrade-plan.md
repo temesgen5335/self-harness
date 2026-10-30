@@ -4,7 +4,7 @@ Date: 2026-10-13 · Status: in progress
 Inputs: the v0.1-draft code review, [research-plan.md](research-plan.md), and maintainer decisions (below).
 
 The harness stays a **v0.1 draft** until every stage below is done. Then it is published on GitHub
-(`temesgen5335/harness`) and tagged `v0.1.0`; there are no intermediate versions.
+(`temesgen5335/self-harness`) and tagged `v0.1.0`; there are no intermediate versions.
 
 ## Maintainer decisions (2026-10-13)
 | # | Decision |
