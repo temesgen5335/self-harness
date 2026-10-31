@@ -81,6 +81,13 @@ Read the project before changing it. Detection is deterministic; interpretation 
 | P3 | `/wf-pr` (PR draft from the project template, commands printed, never run) and `/wf-validate` (AC test cases, evidence, go / hold) | manual (not yet run on a real repo) |
 | P4 | `/wf-spec` drafts an ADR in `docs.adr_dir` for architecture decisions | manual |
 
+## Stage 6: handoff and parallel sessions ✅ done (2026-10-31)
+| ID | Change | Acceptance |
+|---|---|---|
+| H1 | `/wf-handoff` continue / `--fork`: handoff file with script-filled facts (transcript path, git state, board) and Claude-filled sections (verbatim constraints, verified vs believed, ownership, resume); launch command with a pre-registered `--session-id` | test (script); manual (skill) |
+| H2 | `wf-sync.py` board in the git common dir: post events (DONE / CHANGED / NEW / NEED / DECIDED), `UserPromptSubmit` hook shows each session only others' unread entries, capped; locked writes; credential-like text refused | test |
+| H3 | `/wf-sync` skill; `/wf-build` posts when another session depends on the task; uninstall removes the hook, `--purge-work` the board | test |
+
 ## Open questions
 - Local mode: should `wf-new.sh` offer a `--sync` to refresh the harness copy in existing worktrees after an update?
 - Should `strict` also add Claude Code `permissions.deny` rules as a second layer under the hook? (Currently the hook is the only layer, so `ask` works.)

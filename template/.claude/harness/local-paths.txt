@@ -5,6 +5,7 @@
 .claude/hooks/guard-git.sh
 .claude/hooks/guard_git.py
 .claude/hooks/session-context.sh
+.claude/hooks/sync-context.sh
 .claude/skills/wf-*/
 .claude/agents/wf-*.md
 .claude/settings.local.json
