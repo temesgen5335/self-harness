@@ -76,6 +76,8 @@ BASE = {
         "review_tools": ["Read", "Grep", "Glob", "Bash", "Agent", "Task", "WebSearch", "WebFetch"],
         "fix_tools": ["Read", "Grep", "Glob", "Bash", "Agent", "Task", "Edit", "Write"],
     },
+    # Sync board between parallel sessions (wf-sync.py): the most a single prompt is shown from other sessions.
+    "sync": {"max_entries": 20, "max_chars": 2000},
     # Work-item tracks (wf-new.sh --track). "standard" uses `review`; "lite" is for small, low-risk changes
     # and is upgraded to standard automatically when the diff outgrows it (see wf-track.py).
     "tracks": {
