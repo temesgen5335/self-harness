@@ -44,6 +44,8 @@ Never do two phases in one session. The only memory between sessions is `.work/<
 - Read only what the current phase needs: spec section + build-log tail, not whole histories.
 - Use subagents for broad searches and research; keep their raw output out of the main thread.
 - At ~60% context, run `/wf-handoff` and continue in a fresh session.
+- To split work across parallel sessions (e.g. frontend and backend), `/wf-handoff --fork`; they keep in sync by
+  posting events (done, changed, new, need, decided) with `/wf-sync`, never by sharing transcripts.
 
 ## Output
 - On substantive turns, lead with a TL;DR: findings, design choices, decisions needed from maintainers, next step.

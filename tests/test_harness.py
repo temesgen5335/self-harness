@@ -733,5 +733,112 @@ class TestLocalMode(Base):
         self.assertFalse((self.gitdir / "harness-work").exists())
 
 
+class TestSync(Base):
+    A, B = "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"
+
+    def setUp(self):
+        super().setUp()
+        self.repo = make_repo(self.tmp, "p", "--mode", "local")
+
+    def sync(self, sid, *args, cwd=None, check=True):
+        return run(["python3", ".claude/harness/scripts/wf-sync.py", "--session", sid, *args], cwd or self.repo,
+                   check=check)
+
+    def inbox(self, sid, cwd=None):
+        r = run([str((cwd or self.repo) / ".claude/hooks/sync-context.sh")], cwd or self.repo, check=False,
+                inp=json.dumps({"session_id": sid, "prompt": "hi"}))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout
+
+    def fork(self, name="frontend", board="invoices", me="backend"):
+        return json.loads(self.sync(self.A, "handoff", name, "--board", board, "--as", me).stdout)
+
+    def test_fork_registers_both_sessions_and_each_sees_only_the_others_unread_posts(self):
+        out = self.fork()
+        b = out["session_id"]
+        self.assertIn(f"--session-id {b} -n frontend", out["launch"])
+        self.assertEqual(self.inbox(b), "")
+        self.sync(self.A, "post", "DONE", "POST /invoices/export ready", "--ref", "a1b2c3d")
+        got = self.inbox(b)
+        self.assertIn("you are 'frontend'", got)
+        self.assertIn("backend] DONE POST /invoices/export ready -> a1b2c3d", got)
+        self.assertEqual(self.inbox(b), "")      # shown once
+        self.assertEqual(self.inbox(self.A), "")  # never your own posts
+        self.sync(b, "post", "need", "export must accept ?from=&to=")
+        self.assertIn("frontend] NEED export must accept", self.inbox(self.A))
+
+    def test_handoff_file_has_the_facts_and_stays_out_of_git(self):
+        out = self.fork()
+        text = pathlib.Path(out["handoff"]).read_text()
+        for s in ("- Mode: fork", "Full transcript", "- Branch: main", "Sync board: invoices; you are 'frontend'",
+                  "## Constraints from the user (verbatim)", "## State: verified", "## Ownership", "## Resume"):
+            self.assertIn(s, text)
+        self.assertIn("harness-sync/handoffs/", out["handoff"])
+        self.assertEqual(run(["git", "status", "--porcelain"], self.repo).stdout, "")
+
+    def test_continue_hands_this_sessions_board_place_to_the_successor(self):
+        self.sync(self.A, "join", "invoices", "backend")
+        out = json.loads(self.sync(self.A, "handoff", "backend-2").stdout)
+        self.assertIn("- Mode: continue", pathlib.Path(out["handoff"]).read_text())
+        self.assertEqual(self.sync(self.A, "whoami").stdout.strip(), "not on a board")
+        me = json.loads(self.sync(out["session_id"], "whoami").stdout)
+        self.assertEqual((me["board"], me["name"], me["replaces"]), ("invoices", "backend", self.A))
+
+    def test_parallel_worktrees_share_the_board(self):
+        out = self.fork()
+        r = run([".claude/harness/scripts/wf-new.sh", "ui", "frontend export button"], self.repo, check=False)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        wt = self.tmp / "p.worktrees/ui"
+        self.sync(out["session_id"], "post", "NEW", "export button on /invoices", cwd=wt)
+        self.assertIn("NEW export button", self.inbox(self.A))
+
+    def test_inbox_is_capped_and_says_how_many_it_left_out(self):
+        b = self.fork()["session_id"]
+        set_cfg(self.repo, sync={"max_entries": 3, "max_chars": 2000})
+        for i in range(10):
+            self.sync(self.A, "post", "CHANGED", f"field {i} renamed")
+        got = self.inbox(b).splitlines()
+        self.assertEqual([l.split("CHANGED ")[1] for l in got[1:4]], ["field 7 renamed", "field 8 renamed",
+                                                                     "field 9 renamed"])
+        self.assertIn("+7 older unread: wf-sync.py show invoices", got[4])
+        self.assertEqual(len(got), 5)
+
+    def test_bad_posts_are_refused(self):
+        self.fork()
+        key = "AKIA" + "ABCDEFGHIJKLMNOP"
+        for args in (["post", "FYI", "x"], ["post", "DONE", key], ["post", "DONE", "   "]):
+            self.assertEqual(self.sync(self.A, *args, check=False).returncode, 3, args)
+        self.assertEqual(self.sync("not-a-member", "post", "DONE", "x", check=False).returncode, 3)
+        for args in (["join", "../x", "a"], ["join", "b", "Bad Name"], ["handoff", "x", "--as", "y"]):
+            self.assertEqual(self.sync(self.B, *args, check=False).returncode, 3, args)
+        self.assertEqual(self.sync(self.B, "join", "invoices", "backend", check=False).returncode, 3)  # name taken
+
+    def test_hook_is_silent_without_a_board_and_survives_a_broken_one(self):
+        self.assertEqual(self.inbox(self.A), "")
+        self.fork()
+        gitdir = pathlib.Path(run(["git", "rev-parse", "--git-common-dir"], self.repo).stdout.strip())
+        ((self.repo / gitdir) if not gitdir.is_absolute() else gitdir).joinpath(
+            "harness-sync/members.json").write_text("{broken")
+        self.assertEqual(self.inbox(self.A), "")
+
+    def test_concurrent_posts_are_all_kept(self):
+        b = self.fork()["session_id"]
+        procs = [subprocess.Popen(["python3", ".claude/harness/scripts/wf-sync.py", "--session", self.A, "post",
+                                   "DONE", f"task {i}"], cwd=self.repo, env=ENV,
+                                  stdout=subprocess.DEVNULL) for i in range(12)]
+        self.assertEqual([p.wait() for p in procs], [0] * 12)
+        set_cfg(self.repo, sync={"max_entries": 50, "max_chars": 10000})
+        self.assertEqual(sum("DONE task" in l for l in self.inbox(b).splitlines()), 12)
+
+    def test_install_wires_the_hook_and_uninstall_removes_it(self):
+        s = json.loads((self.repo / ".claude/settings.local.json").read_text())
+        cmds = [h["command"] for e in s["hooks"]["UserPromptSubmit"] for h in e["hooks"]]
+        self.assertEqual(cmds, ['"$CLAUDE_PROJECT_DIR"/.claude/hooks/sync-context.sh'])
+        self.fork()
+        run(["bash", str(HARNESS / "uninstall.sh"), str(self.repo), "--purge-work"], self.repo)
+        self.assertFalse((self.repo / ".claude/settings.local.json").exists())
+        self.assertFalse(list(self.tmp.glob("p/.git/harness-sync")))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)
