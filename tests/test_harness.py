@@ -89,6 +89,15 @@ class TestInstall(Base):
         self.assertFalse(list(repo.rglob("__pycache__")))
         self.assertNotIn("Temesgen", "".join(p.read_text() for p in (repo / ".claude").rglob("*") if p.is_file()))
 
+    def test_pr_template_fallback_is_installed_and_used_by_wf_pr(self):
+        repo = make_repo(self.tmp, "p")
+        tpl = (repo / ".claude/harness/templates/pull-request.md").read_text()
+        for s in ("## What", "## Why", "## How", "## Testing", "## Screenshots", "## Risk and rollback",
+                  "No secrets, credentials", "synthetic data"):
+            self.assertIn(s, tpl)
+        self.assertIn(".claude/harness/templates/pull-request.md",
+                      (repo / ".claude/skills/wf-pr/SKILL.md").read_text())
+
     def test_reinstall_keeps_branch_and_config(self):
         repo = make_repo(self.tmp, "p", "--default-branch", "develop")
         set_cfg(repo, profile="strict")

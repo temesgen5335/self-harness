@@ -25,8 +25,11 @@ Config: !`python3 .claude/harness/scripts/hconfig.py docs`
 Read the spec (§1, §4, §11, §12), `git log --oneline <base>..HEAD`, the latest review round and, if present,
 `.work/<slug>/60-validation.md`. Do not read the build log.
 - **Title:** Conventional Commit, ≤ 72 chars, the main change (it becomes the squash commit).
-- **Body:** the project's PR template (`docs.pr_template`) with every section filled from those artifacts — never
-  left as template comments. Without a template use: What / Why / How / Testing / Screenshots / Risk and rollback.
+- **Body:** the project's PR template (`docs.pr_template`) with every section filled from those artifacts. If that
+  is unset or the file does not exist, use `.claude/harness/templates/pull-request.md`. Replace every template
+  comment with content (or "n/a" and the reason); none may remain in the body.
+  - Never put secret values, `.env` contents, raw logs or real personal data in the body: commands and one-line
+    results, synthetic examples.
   - Why: the ticket (state.json `ticket`, e.g. "Closes ACME-123") and the problem.
   - How: decisions and trade-offs from the spec, not a restatement of the diff. Link any ADR it created.
   - Testing: commands the review ran and their results, AC → test mapping, validation evidence if recorded.
