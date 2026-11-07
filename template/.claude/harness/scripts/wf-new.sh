@@ -49,6 +49,10 @@ sync_local_harness() {
       mkdir -p "$dst/$(dirname "$p")"; rm -rf "${dst:?}/$p"; cp -R "$src/$p" "$dst/$p"
     done
   done < "$src/.claude/harness/local-paths.txt"
+  if [[ -f "$src/AGENTS.md" && ! -e "$dst/AGENTS.md" ]] \
+     && grep -q '"agents_md": "local"' "$src/.claude/harness/harness.json" 2>/dev/null; then
+    cp "$src/AGENTS.md" "$dst/AGENTS.md"
+  fi
   [[ -e "$dst/$work_dir" ]] || ln -s "$(cd "$src/$work_dir" && pwd -P)" "$dst/$work_dir"
 }
 

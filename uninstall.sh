@@ -47,6 +47,17 @@ if os.path.exists(p):
     else: open(p, "w").write(json.dumps(s, indent=2) + "\n"); print("  cleaned", p)
 PY
 
+if python3 -c 'import json,sys;sys.exit(json.load(open(".claude/harness/harness.json")).get("agents_md")!="local")' \
+   && [[ -f AGENTS.md ]] && ! git ls-files --error-unmatch AGENTS.md >/dev/null 2>&1; then
+  python3 - << 'PY'
+import pathlib, re
+p = pathlib.Path("AGENTS.md")
+t = re.sub(r"\n*<!-- harness:begin -->.*?<!-- harness:end -->\n?", "\n", p.read_text(), flags=re.S).strip()
+if t: p.write_text(t + "\n"); print("  removed the harness block from AGENTS.md")
+else: p.unlink(); print("  removed AGENTS.md")
+PY
+fi
+
 hook="$common/hooks/commit-msg"
 if [[ -f "$hook" ]] && grep -q 'Enforce Conventional Commits' "$hook"; then rm -f "$hook"; echo "  removed $hook"; fi
 

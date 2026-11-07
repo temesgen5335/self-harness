@@ -749,6 +749,62 @@ class TestCommands(Base):
             self.assertEqual(dc.broken(root, cmd) is not None, bad, cmd)
 
 
+class TestLocalAgentsMd(Base):
+    def repo_with(self, agents=None, tracked=False, *args):
+        repo = self.tmp / "p"
+        repo.mkdir()
+        run(["git", "init", "-q", "-b", "main"], repo)
+        if agents is not None:
+            (repo / "AGENTS.md").write_text(agents)
+        if tracked:
+            run(["git", "add", "AGENTS.md"], repo)
+        run(["git", "-c", "core.hooksPath=/dev/null", "commit", "-q", "--allow-empty", "-m", "chore: init"], repo)
+        r = run(["bash", str(HARNESS / "install.sh"), str(repo), "--mode", "local", *args], repo)
+        return repo, r.stdout
+
+    def status(self, repo):
+        return run(["git", "status", "--porcelain", "--untracked-files=all"], repo).stdout
+
+    def test_created_for_other_agents_kept_out_of_git_and_removed_on_uninstall(self):
+        repo, _ = self.repo_with()
+        self.assertIn("Never claim a check passed", (repo / "AGENTS.md").read_text())
+        self.assertEqual(json.loads((repo / ".claude/harness/harness.json").read_text())["agents_md"], "local")
+        self.assertEqual(self.status(repo), "")
+        run(["bash", str(HARNESS / "install.sh"), str(repo), "--no-agents-md"], repo)  # reinstall keeps it excluded
+        self.assertEqual(self.status(repo), "")
+        run(["bash", str(HARNESS / "uninstall.sh"), str(repo)], repo)
+        self.assertFalse((repo / "AGENTS.md").exists())
+        self.assertEqual(self.status(repo), "")
+
+    def test_a_tracked_agents_md_is_never_touched(self):
+        body = "# Agents\n\nProject rules.\n"
+        repo, out = self.repo_with(body, True)
+        self.assertEqual((repo / "AGENTS.md").read_text(), body)
+        self.assertIn("AGENTS.md is tracked, so it is left alone", out)
+        self.assertNotIn("agents_md", json.loads((repo / ".claude/harness/harness.json").read_text()))
+        run(["bash", str(HARNESS / "uninstall.sh"), str(repo)], repo)
+        self.assertEqual((repo / "AGENTS.md").read_text(), body)
+        self.assertEqual(self.status(repo), "")
+
+    def test_an_untracked_agents_md_of_the_users_is_left_alone(self):
+        repo, out = self.repo_with("my notes\n")
+        self.assertEqual((repo / "AGENTS.md").read_text(), "my notes\n")
+        self.assertIn("of your own exists; left alone", out)
+        run(["bash", str(HARNESS / "uninstall.sh"), str(repo)], repo)
+        self.assertEqual((repo / "AGENTS.md").read_text(), "my notes\n")
+
+    def test_no_agents_md_flag_and_worktrees(self):
+        repo, _ = self.repo_with(None, False, "--no-agents-md")
+        self.assertFalse((repo / "AGENTS.md").exists())
+        shutil.rmtree(repo)
+        repo, _ = self.repo_with()
+        r = run([".claude/harness/scripts/wf-new.sh", "demo", "try it"], repo, check=False)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        wt = self.tmp / "p.worktrees/demo"
+        self.assertIn("<!-- harness:begin -->", (wt / "AGENTS.md").read_text())
+        self.assertEqual(self.status(wt), "")
+
+
 class TestLocalMode(Base):
     def setUp(self):
         super().setUp()
@@ -762,8 +818,9 @@ class TestLocalMode(Base):
 
     def test_install_leaves_no_trace(self):
         self.assertEqual(self.status(), "")
-        for f in ("CLAUDE.md", "AGENTS.md", ".gitignore", ".githooks", "release-please-config.json"):
+        for f in ("CLAUDE.md", ".gitignore", ".githooks", "release-please-config.json"):
             self.assertFalse((self.repo / f).exists(), f)
+        self.assertIn("<!-- harness:begin -->", (self.repo / "AGENTS.md").read_text())  # for other agents, excluded
         s = json.loads((self.repo / ".claude/settings.local.json").read_text())
         self.assertIn("PreToolUse", s["hooks"])
         self.assertTrue(os.access(self.gitdir / "hooks/commit-msg", os.X_OK))

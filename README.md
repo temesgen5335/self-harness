@@ -43,7 +43,7 @@ How strict the harness is (git policy and gate) is project config, from `strict`
 | `.claude/agents/` | The `wf-researcher`, `wf-lens-reviewer` and `wf-adversary` subagents. |
 | `.claude/hooks/` | `guard-git.sh` + `guard_git.py` (git policy for each operation) `session-context.sh` (banner for each new session) and `sync-context.sh` (unread sync-board posts at each prompt). |
 | `.claude/settings.json` | Attribution off and hook wiring, merged into your existing settings. |
-| `AGENTS.md` (managed block) | The same core rules for other coding agents, between `<!-- harness:begin/end -->` markers. |
+| `AGENTS.md` (managed block) | The same core rules for other coding agents (Codex, Cursor, …), between `<!-- harness:begin/end -->` markers. Their hooks and skills are Claude Code only. |
 | `.githooks/commit-msg` | Enforces Conventional Commits and rejects AI attribution. |
 | `release-please-config.json`, manifest, `.github/workflows/` | Versioned releases, plus a PR-title lint for squash merges. |
 | `.work/<slug>/` | Per work item: brief, investigation, spec, build log, reviews, gate, waivers. Committed with the branch. |
@@ -105,7 +105,8 @@ Pick one at the first install with `--mode`. To switch later, run `uninstall.sh`
 | | `--mode tracked` (default) | `--mode local` (no trace in git) |
 |---|---|---|
 | Harness files | committed with the project | hidden via `.git/info/exclude`, so no tracked file (not even `.gitignore`) changes |
-| Rules | `@import` in `CLAUDE.md` + managed block in `AGENTS.md` | injected by the SessionStart hook; `CLAUDE.md` and `AGENTS.md` untouched |
+| Rules for Claude | `@import` in `CLAUDE.md` | injected by the SessionStart hook; `CLAUDE.md` untouched |
+| Rules for other agents (Codex, Cursor, …) | managed block in `AGENTS.md` | an `AGENTS.md` created only when the repo has none, hidden via `.git/info/exclude`; a tracked or personal `AGENTS.md` is left alone (`--no-agents-md` skips it) |
 | Settings | merged into `.claude/settings.json` | merged into `.claude/settings.local.json` |
 | commit-msg hook | `.githooks/` + `core.hooksPath` | `<git-dir>/hooks/commit-msg`, shared by all worktrees |
 | `.work/` artifacts | committed on each feature branch | symlink to `<git-dir>/harness-work/`, shared by all worktrees, never pushed |

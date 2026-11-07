@@ -4,7 +4,8 @@
 #   --mode tracked|local              tracked (default): files are committed, the team shares the workflow.
 #                                     local: leaves no trace in git — ignored via .git/info/exclude, settings in
 #                                     settings.local.json, commit-msg hook in the git dir, .work shared across
-#                                     worktrees in the git dir, CLAUDE.md/AGENTS.md/.gitignore untouched.
+#                                     worktrees in the git dir, CLAUDE.md/.gitignore untouched; an AGENTS.md for
+#                                     other agents only when the repo has none (kept out of git too).
 #                                     Fixed at first install; switch by running uninstall.sh first.
 #   --profile strict|standard|light|guided   initial profile (edit harness.json later)
 #   --preset <name>                   merge presets/local/<name>.json (private, gitignored) or presets/<name>.json
@@ -18,7 +19,7 @@
 #   --default-branch <name>           default: origin/HEAD, else current branch, else main
 #   --release-type python|node|simple|go|rust   (default: auto-detect)
 #   --no-release | --with-release     release-please files (default: on in tracked mode, off in local mode)
-#   --no-agents-md                    tracked mode: do not write the harness block into AGENTS.md
+#   --no-agents-md                    do not write the harness block into AGENTS.md (local mode: do not create one)
 #   --force                           overwrite harness-owned files (skills, agents, hooks, scripts, rules).
 #                                     Never overwrites harness.json; only flags you pass change it.
 set -euo pipefail
@@ -176,15 +177,8 @@ open(dst_p, "w").write(json.dumps(dst, indent=2) + "\n")
 print("  merged", dst_p)
 PY
 
-if [[ $mode == tracked ]]; then
-  echo "CLAUDE.md"
-  if ! grep -qs '@.claude/harness/RULES.md' CLAUDE.md; then
-    printf '\n## Way of work\n@.claude/harness/RULES.md\n' >> CLAUDE.md; echo "  import added"
-  else echo "  import present"; fi
-
-  if [[ $agents_md -eq 1 ]]; then
-    echo "AGENTS.md (managed block)"
-    python3 - "$SRC/AGENTS.block.md" << 'PY'
+agents_block() { # write or refresh the managed harness block in AGENTS.md
+  python3 - "$SRC/AGENTS.block.md" << 'PY'
 import pathlib, re, sys
 block = pathlib.Path(sys.argv[1]).read_text().strip()
 p = pathlib.Path("AGENTS.md"); text = p.read_text() if p.exists() else ""
@@ -196,6 +190,17 @@ else:
     text = (text.rstrip() + "\n\n" if text.strip() else "") + managed + "\n"; action = "added"
 p.write_text(text); print(f"  {action}")
 PY
+}
+
+if [[ $mode == tracked ]]; then
+  echo "CLAUDE.md"
+  if ! grep -qs '@.claude/harness/RULES.md' CLAUDE.md; then
+    printf '\n## Way of work\n@.claude/harness/RULES.md\n' >> CLAUDE.md; echo "  import added"
+  else echo "  import present"; fi
+
+  if [[ $agents_md -eq 1 ]]; then
+    echo "AGENTS.md (managed block)"
+    agents_block
   fi
 
   echo "Git hooks"
@@ -209,7 +214,23 @@ PY
     grep -qxF "$line" .gitignore 2>/dev/null || { echo "$line" >> .gitignore; echo "  + $line"; }
   done
 else
-  echo "Rules: injected by the SessionStart hook (CLAUDE.md, AGENTS.md and .gitignore untouched)"
+  echo "Rules: injected by the SessionStart hook (CLAUDE.md and .gitignore untouched)"
+  # Other coding agents (Codex, Cursor, ...) read AGENTS.md. Create it only when the repo has none, keep it out
+  # of git, and record that we own it so uninstall.sh and wf-new.sh handle only our copy.
+  if [[ $agents_md -eq 1 ]]; then
+    echo "AGENTS.md (for other coding agents; kept out of git)"
+    if git ls-files --error-unmatch AGENTS.md >/dev/null 2>&1; then
+      echo "  AGENTS.md is tracked, so it is left alone; other agents do not get the harness rules in local mode"
+    elif [[ -e AGENTS.md ]] && ! grep -q '<!-- harness:begin -->' AGENTS.md; then
+      echo "  an untracked AGENTS.md of your own exists; left alone"
+    else
+      agents_block
+      python3 -c 'import json;p=".claude/harness/harness.json";c=json.load(open(p));c["agents_md"]="local";open(p,"w").write(json.dumps(c,indent=2)+"\n")'
+    fi
+  fi
+  excl_extra=()
+  if [[ -e AGENTS.md ]] && grep -q '"agents_md": "local"' .claude/harness/harness.json \
+     && ! git ls-files --error-unmatch AGENTS.md >/dev/null 2>&1; then excl_extra+=(AGENTS.md); fi
 
   echo "Git hooks (local, in the git dir, shared by all worktrees)"
   cur="$(git config --get core.hooksPath || true)"
@@ -229,10 +250,10 @@ else
   else ln -s "$common/harness-work" .work; echo "  .work -> $common/harness-work"; fi
 
   echo "Local excludes ($common/info/exclude)"
-  python3 - "$common/info/exclude" ".claude/harness/local-paths.txt" << 'PY'
+  python3 - "$common/info/exclude" ".claude/harness/local-paths.txt" "${excl_extra[@]+"${excl_extra[@]}"}" << 'PY'
 import pathlib, sys
 p, paths = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
-entries = [l.strip() for l in paths.read_text().splitlines() if l.strip() and not l.startswith("#")]
+entries = [l.strip() for l in paths.read_text().splitlines() if l.strip() and not l.startswith("#")] + sys.argv[3:]
 block = "# >>> claude-harness (local mode)\n" + "".join(f"/{e}\n" for e in entries) + "# <<< claude-harness\n"
 p.parent.mkdir(parents=True, exist_ok=True)
 t = p.read_text() if p.exists() else ""
