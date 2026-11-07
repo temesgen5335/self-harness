@@ -979,6 +979,23 @@ class TestSync(Base):
         set_cfg(self.repo, sync={"max_entries": 50, "max_chars": 10000})
         self.assertEqual(sum("DONE task" in l for l in self.inbox(b).splitlines()), 12)
 
+    def test_sync_dir_shares_one_board_between_separate_repos(self):
+        shared = self.tmp / "shared-board"
+        other = make_repo(self.tmp, "q", "--mode", "local")
+        for repo in (self.repo, other):
+            set_cfg(repo, sync={"dir": str(shared)})
+        b = self.fork()["session_id"]                                   # forked from repo p
+        run(["python3", ".claude/harness/scripts/wf-sync.py", "--session", b, "post", "NEW", "button ready"], other)
+        self.assertIn("frontend] NEW button ready", self.inbox(self.A))  # read back in repo p
+        self.assertTrue((shared / "boards/invoices.jsonl").exists())
+        self.assertFalse(list(self.tmp.glob("*/.git/harness-sync")))
+
+    def test_relative_sync_dir_is_refused(self):
+        set_cfg(self.repo, sync={"dir": "boards"})
+        r = self.sync(self.A, "join", "x", "y", check=False)
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("must be an absolute path", r.stderr)
+
     def test_install_wires_the_hook_and_uninstall_removes_it(self):
         s = json.loads((self.repo / ".claude/settings.local.json").read_text())
         cmds = [h["command"] for e in s["hooks"]["UserPromptSubmit"] for h in e["hooks"]]

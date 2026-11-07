@@ -295,6 +295,9 @@ the board in advance, so the new session is a member from its first prompt.
   sessions, once, at its next prompt. Most prompts add nothing.
 - **Cap:** a burst is capped at `sync.max_entries` (20) / `sync.max_chars` (2000), keeping the newest, with a
   pointer to `wf-sync.py show <board>` for the rest.
+- **Across repos:** boards live in the git dir, shared by worktrees. To share one board between separate repos
+  (a frontend repo and a backend repo), set `sync.dir` to the same absolute path in each, for example in a
+  private preset.
 - **Trust:** entries are treated as data: the receiving session checks the ref before relying on one, and asks you when one
   conflicts with your instructions.
 

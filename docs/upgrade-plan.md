@@ -88,6 +88,15 @@ Read the project before changing it. Detection is deterministic; interpretation 
 | H2 | `wf-sync.py` board in the git common dir: post events (DONE / CHANGED / NEW / NEED / DECIDED), `UserPromptSubmit` hook shows each session only others' unread entries, capped; locked writes; credential-like text refused | test |
 | H3 | `/wf-sync` skill; `/wf-build` posts when another session depends on the task; uninstall removes the hook, `--purge-work` the board | test |
 
+## Stage 7: rollout readiness ✅ done (2026-11-07)
+| ID | Change | Acceptance |
+|---|---|---|
+| R1 | Session banner in warn mode says the guard warns, not the decisions it does not apply | test |
+| R2 | PR template for this repo; `/wf-pr` fallback template with a safety checklist (secrets, personal data, raw logs, risky areas) | test (installed, referenced); manual (filled by `/wf-pr`) |
+| R3 | `detect-commands.py` + installer: commands from Makefile, package.json, Python, Go, Rust; never runs them; replaces preset commands the repo cannot run; `--command`, `--detect-commands`; warns when no test command | test; checked on two real repos (uv/pytest API, pnpm portal) |
+| R4 | Local mode creates an excluded `AGENTS.md` for other agents when the repo has none; tracked or personal ones untouched | test |
+| R5 | `sync.dir`: one board shared by separate repos, or with another tool using the same files | test |
+
 ## Open questions
 - Local mode: should `wf-new.sh` offer a `--sync` to refresh the harness copy in existing worktrees after an update?
 - Should `strict` also add Claude Code `permissions.deny` rules as a second layer under the hook? (Currently the hook is the only layer, so `ask` works.)
