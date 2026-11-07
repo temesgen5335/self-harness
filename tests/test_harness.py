@@ -629,6 +629,12 @@ class TestGuidedProfile(Base):
                          ("guided", "warn", ["secrets"]))
         self.assertTrue(cfg["validation"]["required"])
 
+    def test_banner_says_warn_not_the_underlying_decisions(self):
+        out = run([str(self.repo / ".claude/hooks/session-context.sh")], self.repo).stdout
+        banner = [l for l in out.splitlines() if l.startswith("[harness] maintainers")][0]
+        self.assertIn("git guard warn (git ops warn with a reminder; enforced: secrets)", banner)
+        self.assertNotIn("push: block", banner)
+
     def test_git_operations_warn_with_a_reminder(self):
         for cmd, note in (("git push origin feature/x", "Push is the user's"), ("gh pr merge 3", "Merging is the user's"),
                           ("git commit -m 'feat: x'", "no Co-Authored-By"), ("git commit --no-verify -m x", "Never bypass hooks")):

@@ -13,9 +13,16 @@ cfg = load(root); wd = cfg["work_dir"]
 if cfg.get("mode") == "local":  # CLAUDE.md is not touched in local mode, so the rules are injected here
     print((root / ".claude/harness/RULES.md").read_text())
 team = ", ".join(p.get("name") or p.get("email") for p in team_members(cfg)) or "not set (edit team in harness.json)"
-ops = cfg["git"]["ops"]
+ops, guard = cfg["git"]["ops"], cfg["git"]["guard"]
+kept = cfg["git"].get("always_enforce", [])
+if guard == "warn":  # ops decisions only apply to always_enforce here; the rest warn with a reminder
+    detail = "git ops warn with a reminder" + (f"; enforced: {', '.join(kept)}" if kept else "")
+elif guard == "off":
+    detail = "OFF: git and secret operations are not checked"
+else:
+    detail = f"commit: {ops.get('commit')}, push: {ops.get('push')}"
 print(f"[harness] maintainers: {team} · profile {cfg['profile']} · gate {cfg['gate']['mode']} · "
-      f"git guard {cfg['git']['guard']} (commit: {ops.get('commit')}, push: {ops.get('push')})")
+      f"git guard {guard} ({detail})")
 nxt = {"new": "/wf-investigate", "investigated": "/wf-spec (fresh session)",
        "specified": "wait for a maintainer to approve the spec", "approved": "/wf-build",
        "building": "/wf-build (next task) or /wf-commit", "built": "/wf-review (fresh session)",
@@ -25,9 +32,6 @@ nxt = {"new": "/wf-investigate", "investigated": "/wf-spec (fresh session)",
        "released": "nothing"}
 if cfg.get("validation", {}).get("required"):
     nxt["passed"] = "/wf-validate (manual validation is required before the PR), then /wf-pr"
-if cfg["git"]["guard"] == "warn":
-    kept = ", ".join(cfg["git"].get("always_enforce", [])) or "nothing"
-    print(f"[harness] guard warns and reminds; still enforced: {kept}")
 for sp in (root / wd).glob("*/state.json"):
     s = json.loads(sp.read_text())
     if s.get("branch") != branch:
