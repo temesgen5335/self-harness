@@ -14,6 +14,7 @@ cd "$target"
 [[ -f .claude/harness/harness.json ]] || { echo "no harness installed here" >&2; exit 3; }
 mode="$(python3 -c 'import json;print(json.load(open(".claude/harness/harness.json")).get("mode","tracked"))')"
 common="$(cd "$(git rev-parse --git-common-dir)" && pwd)"
+shared_sync="$(python3 .claude/harness/scripts/hconfig.py sync.dir 2>/dev/null || true)"
 
 if [[ $mode == tracked ]]; then
   cat << MSG
@@ -48,7 +49,8 @@ if os.path.exists(p):
 PY
 
 if python3 -c 'import json,sys;sys.exit(json.load(open(".claude/harness/harness.json")).get("agents_md")!="local")' \
-   && [[ -f AGENTS.md ]] && ! git ls-files --error-unmatch AGENTS.md >/dev/null 2>&1; then
+   && [[ -f AGENTS.md ]] && grep -q '<!-- harness:begin -->' AGENTS.md \
+   && ! git ls-files --error-unmatch AGENTS.md >/dev/null 2>&1; then
   python3 - << 'PY'
 import pathlib, re
 p = pathlib.Path("AGENTS.md")
@@ -79,5 +81,6 @@ rmdir .claude/hooks .claude/skills .claude/agents .claude 2>/dev/null || true
 
 if [[ $purge -eq 1 ]]; then rm -rf "$common/harness-work" "$common/harness-sync"; echo "  purged $common/harness-work and harness-sync"
 else echo "  kept work artifacts in $common/harness-work and handoffs/sync boards in harness-sync (use --purge-work to delete)"; fi
+[[ -n "$shared_sync" ]] && echo "  sync.dir $shared_sync is shared with other repos, so it was not touched; delete it yourself when no repo uses it"
 echo "Worktrees made by wf-new.sh still hold a copy: run uninstall.sh in each, or remove those worktrees."
 [[ -z "$(git status --porcelain)" ]] && echo "git status: clean" || git status --short

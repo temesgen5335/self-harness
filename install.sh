@@ -12,8 +12,9 @@
 #                                     into harness.json once, recorded as "preset"; its _install options set
 #                                     defaults such as --no-release
 #   --command key=value               set a check command (install, lint, typecheck, test, stress, build); repeatable
-#   --detect-commands                 re-detect commands from the repo's files (fresh installs and newly applied
-#                                     presets always do); fills empty ones and replaces ones that cannot run
+#   --detect-commands                 re-detect commands from the repo's files: fill empty ones and replace ones
+#                                     that cannot run here when a replacement is found (fresh installs and newly
+#                                     applied presets fill empty ones and fix the preset's own commands)
 #   --lead "Name <email>"             team lead (default: git user.name/user.email of whoever runs this)
 #   --collaborator "Name <email>"     add a collaborator (repeatable)
 #   --default-branch <name>           default: origin/HEAD, else current branch, else main
@@ -149,7 +150,11 @@ PY
 
 if [[ $fresh -eq 1 || $preset_new -eq 1 || $detect -eq 1 || ${#commands[@]} -gt 0 ]]; then
   echo "Check commands (from the repo's files; nothing is run)"
-  dargs=(--apply); [[ $fresh -eq 1 || $preset_new -eq 1 || $detect -eq 1 ]] && dargs+=(--replace-stale)
+  dargs=(--apply); [[ $detect -eq 1 ]] && dargs+=(--redetect)
+  if [[ $preset_new -eq 1 ]]; then  # only the commands this preset just set may be replaced or cleared
+    while IFS= read -r k; do [[ -n "$k" ]] && dargs+=(--replace "$k"); done < <(python3 -c \
+      'import json,sys;print("\n".join(json.load(open(sys.argv[1])).get("commands",{})))' "$preset_file")
+  fi
   python3 .claude/harness/scripts/detect-commands.py "${dargs[@]}" "${commands[@]+"${commands[@]}"}"
 fi
 
@@ -229,7 +234,9 @@ else
     fi
   fi
   excl_extra=()
-  if [[ -e AGENTS.md ]] && grep -q '"agents_md": "local"' .claude/harness/harness.json \
+  # Hide AGENTS.md only while it is still our copy (markers present), never a file the user put there since.
+  if [[ -e AGENTS.md ]] && grep -q '<!-- harness:begin -->' AGENTS.md \
+     && grep -q '"agents_md": "local"' .claude/harness/harness.json \
      && ! git ls-files --error-unmatch AGENTS.md >/dev/null 2>&1; then excl_extra+=(AGENTS.md); fi
 
   echo "Git hooks (local, in the git dir, shared by all worktrees)"

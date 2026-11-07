@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """Suggest the project's check commands (install, lint, typecheck, test, build) from its files.
 
-Usage: detect-commands.py [--apply] [--replace-stale] [--set key=value ...]
-  (no flags)        print what is configured, what was detected, and which configured commands look broken
-  --apply           write to harness.json: fill empty commands with detected ones, and apply --set values
-  --replace-stale   with --apply, also replace commands that look broken (install.sh passes it for commands a
-                    preset just set; a command you wrote yourself is only reported)
-  --set key=value   set a command explicitly (repeatable); wins over detection
+Usage: detect-commands.py [--apply] [--redetect] [--replace KEY ...] [--set key=value ...]
+  (no flags)       print what is configured, what was detected, and which configured commands cannot run here
+  --apply          write harness.json: fill EMPTY commands with detected ones and apply --set values
+  --redetect       with --apply, also replace a command that cannot run here when a replacement was detected
+                   (install.sh --detect-commands); a command is never cleared this way
+  --replace KEY    with --apply, KEY was just set by a preset rather than by you: replace it when it cannot run
+                   here, or clear it when nothing was detected (install.sh passes these; repeatable)
+  --set key=value  set a command explicitly (repeatable); wins over everything
 
 It reads files only and never runs a project command. Detected commands are a best guess: run each once.
-A command "looks broken" when the script it names is missing, its make target does not exist, or its
-package.json script does not exist. Sources, first match wins: Makefile targets, package.json scripts, then
-Python (uv / poetry / pdm), Go and Rust conventions.
+"Cannot run here" is said only when sure: the script it names is missing, its make target is not in the makefile
+make would read (following -C, -f and includes), or its package.json script does not exist. Compound shell
+commands, inline code and anything with variables are left alone. Sources, first match wins: Makefile targets,
+package.json scripts, then Python (uv / poetry / pdm), Go and Rust conventions.
 """
 from __future__ import annotations
 
@@ -35,14 +38,48 @@ def read(p: pathlib.Path) -> str:
         return ""
 
 
+def makefile(root: pathlib.Path) -> pathlib.Path | None:
+    """The file make reads by default: the first of GNUmakefile, makefile, Makefile."""
+    for name in ("GNUmakefile", "makefile", "Makefile"):
+        if (root / name).is_file():
+            return root / name
+    return None
+
+
+def parse_make(path: pathlib.Path | None, seen=None) -> tuple:
+    """(targets, certain). certain is False when targets may come from somewhere this cannot follow:
+    variables or patterns in rule names, or an include that is missing or uses variables."""
+    if path is None:
+        return set(), True
+    seen = seen if seen is not None else set()
+    if path in seen:
+        return set(), True
+    seen.add(path)
+    targets, certain = set(), True
+    for line in read(path).splitlines():
+        if line.startswith(("\t", "#")):
+            continue
+        inc = re.match(r"^-?include\s+(.+)", line)
+        if inc:
+            for name in inc.group(1).split():
+                p = path.parent / name
+                if "$" in name or "%" in name or not p.is_file():
+                    certain = False
+                else:
+                    t, c = parse_make(p, seen)
+                    targets |= t; certain = certain and c
+            continue
+        m = re.match(r"^([^:=#]+?)\s*::?(?!=)", line)
+        if m and not line.startswith("."):
+            names = m.group(1).split()
+            if any("$" in n or "%" in n for n in names):
+                certain = False
+            targets.update(n for n in names if "$" not in n and "%" not in n)
+    return targets, certain
+
+
 def make_targets(root: pathlib.Path) -> set:
-    targets = set()
-    for name in ("Makefile", "makefile", "GNUmakefile"):
-        for line in read(root / name).splitlines():
-            m = re.match(r"^([A-Za-z0-9_.\- ]+?)\s*:(?!=)", line)
-            if m and not line.startswith(("\t", "#", ".")):
-                targets.update(m.group(1).split())
-    return targets
+    return parse_make(makefile(root))[0]
 
 
 def pkg_scripts(root: pathlib.Path) -> dict:
@@ -131,38 +168,82 @@ def detect(root: pathlib.Path) -> dict:
     return out
 
 
+def broken_make(root: pathlib.Path, args: list) -> str | None:
+    """make [-C dir] [-f file] [other options] [VAR=value] target...; None when unsure."""
+    directory, file, wanted, i = root, None, [], 0
+    while i < len(args):
+        a = args[i]
+        if a in ("-C", "--directory", "-f", "--file", "--makefile", "-I", "--include-dir", "-o", "-W"):
+            if i + 1 >= len(args):
+                return None
+            if a in ("-C", "--directory"):
+                directory = directory / args[i + 1]
+            elif a in ("-f", "--file", "--makefile"):
+                file = args[i + 1]
+            i += 2
+            continue
+        if a.startswith(("--directory=", "--file=", "--makefile=")):
+            key, _, val = a.partition("=")
+            directory, file = (directory / val, file) if key == "--directory" else (directory, val)
+        elif a.startswith("-C") and len(a) > 2:
+            directory = directory / a[2:]
+        elif a.startswith("-f") and len(a) > 2:
+            file = a[2:]
+        elif a.startswith("-") or "=" in a:
+            if a in ("-j", "-l", "--jobs", "--load-average") and i + 1 < len(args) and args[i + 1].isdigit():
+                i += 1
+        else:
+            wanted.append(a)
+        i += 1
+    if "$" in str(directory) or (file and "$" in file) or any("$" in t for t in wanted):
+        return None
+    if not directory.is_dir():
+        return f"directory {directory.relative_to(root) if directory != root else '.'} does not exist"
+    path = (directory / file) if file else makefile(directory)
+    if path is None or not path.is_file():
+        return f"{file} does not exist" if file else "no Makefile"
+    targets, certain = parse_make(path)
+    missing = [t for t in wanted if t not in targets]
+    return f"make target '{missing[0]}' does not exist" if missing and certain else None
+
+
 def broken(root: pathlib.Path, cmd: str) -> str | None:
-    """Why a configured command cannot run here, or None. Checks files only; never runs anything."""
+    """Why a configured command cannot run here, or None. Says broken only when sure; reads files only."""
     try:
         tokens = shlex.split(cmd)
     except ValueError:
         return None
-    if not tokens:
-        return None
+    if not tokens or any(t in ("&&", "||", ";", "|") for t in tokens):
+        return None  # compound shell commands: too many ways to be right
     if tokens[0] == "make":
-        targets = make_targets(root)
-        wanted = [t for t in tokens[1:] if not t.startswith("-") and "=" not in t]
-        if not targets:
-            return "no Makefile"
-        missing = [t for t in wanted if t not in targets]
-        return f"make target '{missing[0]}' does not exist" if missing else None
-    if tokens[0] in ("npm", "pnpm", "yarn", "bun") and len(tokens) > 2 and tokens[1] == "run":
-        return None if tokens[2] in pkg_scripts(root) else f"package.json has no script '{tokens[2]}'"
-    for t in tokens[1:] if tokens[0] in ("bash", "sh", "python", "python3", "node") else tokens[:1]:
-        if t.startswith("-") or "..." in t:
-            continue
-        if ("/" in t or t.endswith((".sh", ".py", ".js", ".mjs"))) and not t.startswith("/"):
-            if not (root / t).exists():
-                return f"{t} does not exist"
-            break
-    return None
+        return broken_make(root, tokens[1:])
+    if tokens[0] in ("npm", "pnpm", "yarn", "bun") and "run" in tokens[1:2]:
+        rest = [t for t in tokens[2:] if not t.startswith("-")]
+        if not (root / "package.json").exists():
+            return "no package.json"
+        if not rest:
+            return None
+        return None if rest[0] in pkg_scripts(root) else f"package.json has no script '{rest[0]}'"
+    if tokens[0] in ("bash", "sh", "zsh", "python", "python3", "node"):
+        if any(t in ("-c", "-e", "-m", "--eval") for t in tokens[1:]):
+            return None  # inline code or a module, not a file
+        script = next((t for t in tokens[1:] if not t.startswith("-")), None)
+    else:
+        script = tokens[0] if "/" in tokens[0] else None
+    if not script or "$" in script or "..." in script:
+        return None
+    path = pathlib.Path(script).expanduser()
+    if not path.is_absolute():
+        path = root / path
+    return None if path.exists() else f"{script} does not exist"
 
 
 def main(argv=None) -> int:
     import argparse
     ap = argparse.ArgumentParser(prog="detect-commands.py", description=__doc__.splitlines()[0])
     ap.add_argument("--apply", action="store_true")
-    ap.add_argument("--replace-stale", action="store_true")
+    ap.add_argument("--redetect", action="store_true")
+    ap.add_argument("--replace", action="append", default=[], metavar="KEY")
     ap.add_argument("--set", action="append", default=[], metavar="key=value")
     a = ap.parse_args(argv)
     root = pathlib.Path(subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True,
@@ -179,40 +260,49 @@ def main(argv=None) -> int:
         explicit[k] = v.strip()
     found = detect(root)
     changed = []
+
+    def put(key, value):
+        if a.apply and cmds.get(key) != value:
+            cmds[key] = value
+            changed.append(key)
+
     for key in KEYS + ("stress",):
         cur = str(cmds.get(key, "")).strip()
+        det = found.get(key)
         if key in explicit:
-            new, why = explicit[key], "set explicitly"
-        elif key == "stress":
+            print(f"  {key:<9} {explicit[key] or '(none)'}  <- set explicitly")
+            put(key, explicit[key])
             continue
+        if key == "stress":
+            continue
+        if not cur:
+            print(f"  {key:<9} {det[0] + '  <- detected from ' + det[1] if det else '(none)'}")
+            if det:
+                put(key, det[0])
+            continue
+        bad = broken(root, cur)
+        if not bad:
+            print(f"  {key:<9} {cur}")
+        elif key in a.replace and det:
+            print(f"  {key:<9} {det[0]}  <- detected from {det[1]}; replaced the preset's '{cur}': {bad}")
+            put(key, det[0])
+        elif key in a.replace:
+            print(f"  {key:<9} (none)  <- cleared the preset's '{cur}': {bad}; nothing detected")
+            put(key, "")
+        elif a.redetect and det:
+            print(f"  {key:<9} {det[0]}  <- detected from {det[1]}; replaced '{cur}': {bad}")
+            put(key, det[0])
         else:
-            det = found.get(key)
-            bad = broken(root, cur) if cur else None
-            if cur and not bad:
-                print(f"  {key:<9} {cur}")
-                continue
-            if cur and bad and not a.replace_stale:
-                print(f"  {key:<9} {cur}  <- WARNING: {bad}; fix it in harness.json"
-                      + (f" (detected: {det[0]})" if det else ""))
-                continue
-            if not det:
-                print(f"  {key:<9} (none)" + (f"  <- dropped '{cur}': {bad}" if cur else ""))
-                if cur and a.apply:
-                    cmds[key] = ""; changed.append(key)
-                continue
-            new, why = det[0], f"detected from {det[1]}" + (f"; replaced '{cur}': {bad}" if cur else "")
-        print(f"  {key:<9} {new or '(none)'}  <- {why}")
-        if a.apply and cmds.get(key) != new:
-            cmds[key] = new; changed.append(key)
-    if not str(cmds.get("test", "")).strip():
+            print(f"  {key:<9} {cur}  <- WARNING: {bad}; kept, fix it in harness.json"
+                  + (f" (detected: {det[0]})" if det else ""))
+    test_cmd = str((cmds if a.apply else {**cmds, **explicit}).get("test", "")).strip()
+    if not test_cmd:
         print("  WARNING: no test command, so the gate will not require tests. Set one:\n"
               "           install.sh <repo> --command test='<your test command>'")
     if a.apply and changed:
         path.write_text(json.dumps(cfg, indent=2) + "\n")
-    if found and (a.apply and changed):
         print("  Detected commands are a best guess: run each once before relying on the gate.")
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())

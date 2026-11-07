@@ -266,7 +266,7 @@ so the builder's reasoning doesn't bias it. The builder answers each finding in 
 - **Fork** (`/wf-handoff --fork frontend "Build the export button" --as backend`): a parallel session with its own
   goal, like a second pair of hands. Give it its own worktree with `wf-new.sh`.
 
-Both write a handoff file in `<git-common-dir>/harness-sync/handoffs/` (shared by worktrees, never committed).
+Both write a handoff file in `<git-common-dir>/harness-sync/handoffs/`, or under `sync.dir` when set (shared by worktrees, never committed).
 The script fills in the facts: the old session's transcript path, branch, HEAD, upstream and uncommitted files.
 Claude fills in the rest:
 - the goal;
