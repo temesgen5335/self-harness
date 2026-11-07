@@ -559,7 +559,8 @@ class TestPreset(Base):
         repo = make_repo(self.tmp, "proj", "--preset", "example")
         self.assertFalse((repo / "release-please-config.json").exists())
         cfg = json.loads(run(["python3", ".claude/harness/scripts/hconfig.py"], repo).stdout)
-        self.assertEqual((cfg["commands"]["test"], cfg["profile"]), ("make test", "guided"))
+        # the preset says "make test", which this empty repo (no Makefile) cannot run, so it is dropped
+        self.assertEqual((cfg["commands"]["test"], cfg["profile"]), ("", "guided"))
         self.assertEqual(cfg["docs"]["adr_dir"], "docs/adr")
         commit_all(repo)
         run(["git", "branch", "dev"], repo)
