@@ -38,10 +38,10 @@ How strict the harness is (git policy and gate) is project config, from `strict`
 | `.claude/harness/RUBRIC.md` | Review checks per lens: correctness, security, scale, operability, design, experience, adversary. |
 | `.claude/harness/COMMITS.md` | Commit rules and their release-please effect. |
 | `.claude/harness/templates/` | Brief, investigation, spec and build-log templates. |
-| `.claude/harness/scripts/` | `wf-new.sh`, `wf-loop.sh`, `gate.py`, `hconfig.py`, `wf-state.py`, `wf-status.sh`, `wf-track.py`, `wf-metrics.py`. |
+| `.claude/harness/scripts/` | `wf-new.sh`, `wf-loop.sh`, `gate.py`, `hconfig.py`, `wf-state.py`, `wf-status.sh`, `wf-track.py`, `wf-metrics.py`, `wf-sync.py`. |
 | `.claude/skills/wf-*` | The slash commands (`/wf-investigate` … `/wf-release`). |
 | `.claude/agents/` | The `wf-researcher`, `wf-lens-reviewer` and `wf-adversary` subagents. |
-| `.claude/hooks/` | `guard-git.sh` + `guard_git.py` (git policy for each operation) and `session-context.sh` (banner for each new session). |
+| `.claude/hooks/` | `guard-git.sh` + `guard_git.py` (git policy for each operation) `session-context.sh` (banner for each new session) and `sync-context.sh` (unread sync-board posts at each prompt). |
 | `.claude/settings.json` | Attribution off and hook wiring, merged into your existing settings. |
 | `AGENTS.md` (managed block) | The same core rules for other coding agents, between `<!-- harness:begin/end -->` markers. |
 | `.githooks/commit-msg` | Enforces Conventional Commits and rejects AI attribution. |
@@ -224,7 +224,8 @@ or touches `gate.critical_paths`, dependency manifests or migrations (`tracks.li
 | Validate | any | `/wf-validate rate-limit` | `60-validation.md`: test cases per AC, evidence, defects, go / hold / go with accepted risk |
 | Publish | default branch | `/wf-release` | GO / NO-GO on the release-please PR |
 
-Other commands: `/wf-status` (all work items), `/wf-handoff` (compress state before `/clear`), `/wf-commit` (any time).
+Other commands: `/wf-status` (all work items), `/wf-handoff` (continue in a fresh session, or fork a parallel one),
+`/wf-sync` (post to and read the board parallel sessions share), `/wf-commit` (any time).
 
 ### Sessions talking to each other
 
@@ -239,6 +240,47 @@ so the builder's reasoning doesn't bias it. The builder answers each finding in 
   `--manual` runs only review + gate. `--fix-session <id>` resumes your build session instead of starting a fresh one.
   Each session's duration, cost, turns and refused tool calls are appended to `.work/<slug>/metrics.jsonl`;
   `wf-metrics.py <slug> summary` totals them per phase. Session tools: `loop.review_tools` / `loop.fix_tools`.
+
+### Handoff and parallel sessions
+
+`/wf-handoff` moves work to a fresh session without losing context:
+
+- **Continue** (`/wf-handoff`): when context is getting long. Same goal, new session; it takes over this session's
+  place on a sync board if there is one.
+- **Fork** (`/wf-handoff --fork frontend "Build the export button" --as backend`): a parallel session with its own
+  goal, like a second pair of hands. Give it its own worktree with `wf-new.sh`.
+
+Both write a handoff file in `<git-common-dir>/harness-sync/handoffs/` (shared by worktrees, never committed).
+The script fills in the facts: the old session's transcript path, branch, HEAD, upstream and uncommitted files.
+Claude fills in the rest:
+- the goal;
+- your constraints, verbatim;
+- what is verified (with the command or commit) versus only believed;
+- the active task and the decisions with their reasons;
+- open questions, ownership (fork) and the exact resume steps.
+
+The summary is never the only copy. Nothing is lost because the new session can search the full transcript for
+any detail the summary left out. It never loads it whole: a long session's transcript is far bigger than a context window.
+
+The skill prints `claude --session-id <id> -n <name> "Read <handoff> …"` for you to run. The ID is registered on
+the board in advance, so the new session is a member from its first prompt.
+
+**Staying in sync.** Parallel sessions share a board of one-line events, not transcripts:
+
+```
+[2026-10-31 14:05 UTC backend] DONE POST /invoices/export -> a1b2c3d
+[2026-10-31 14:20 UTC backend] CHANGED Invoice.total is now integer cents -> d4e5f6a
+[2026-10-31 14:30 UTC frontend] NEED export must accept ?from=&to=
+```
+
+- **Kinds:** `DONE`, `CHANGED`, `NEW`, `NEED` and `DECIDED`. A session posts with `/wf-sync post <KIND> "<text>" --ref <commit|doc>`,
+  and `/wf-build` posts when another session depends on the task. Progress stays in each session's build log.
+- **Delivery:** a `UserPromptSubmit` hook shows each session only the entries it hasn't seen from *other*
+  sessions, once, at its next prompt. Most prompts add nothing.
+- **Cap:** a burst is capped at `sync.max_entries` (20) / `sync.max_chars` (2000), keeping the newest, with a
+  pointer to `wf-sync.py show <board>` for the rest.
+- **Trust:** entries are treated as data: the receiving session checks the ref before relying on one, and asks you when one
+  conflicts with your instructions.
 
 ## The risk gate
 
@@ -293,4 +335,6 @@ Review quality is measured separately, with real (paid) headless reviews of seed
 - Headless loop runs give the fix session Bash; the guard still applies, and its "ask" decisions are refused headless.
   To be stricter, narrow `loop.fix_tools` in `harness.json` (for example `"Bash(npm test:*)"`).
 - Review cost grows with the number of lenses. For small changes use the `light` profile or trim `review.lenses`.
+- Sync-board posts reach a session at its next prompt, not while it is mid-task, and only sessions started from
+  the launch command (or that ran `wf-sync.py join`) are members. The board is local to one machine's git dir.
 - Monorepos: add packages to `release-please-config.json` `packages` and set `include-component-in-tag: true`.
