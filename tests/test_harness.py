@@ -672,6 +672,83 @@ class TestGuidedProfile(Base):
         self.assertEqual(guard(self.repo, "git commit -m 'feat: config'"), "warn")
 
 
+class TestCommands(Base):
+    def project(self, files: dict, *install_args):
+        repo = self.tmp / "app"
+        repo.mkdir()
+        run(["git", "init", "-q", "-b", "main"], repo)
+        for name, body in files.items():
+            (repo / name).parent.mkdir(parents=True, exist_ok=True)
+            (repo / name).write_text(body)
+        run(["git", "add", "-A"], repo)
+        run(["git", "-c", "core.hooksPath=/dev/null", "commit", "-q", "-m", "chore: init"], repo)
+        r = run(["bash", str(HARNESS / "install.sh"), str(repo), *install_args], repo)
+        return repo, r.stdout
+
+    def cmds(self, repo):
+        return json.loads((repo / ".claude/harness/harness.json").read_text())["commands"]
+
+    def test_python_project_with_uv_ruff_mypy_pytest(self):
+        repo, _ = self.project({"pyproject.toml": "[project]\nname='x'\ndependencies=['pytest']\n[tool.ruff]\n"
+                                                  "line-length=100\n[tool.mypy]\nstrict=true\n", "uv.lock": ""})
+        c = self.cmds(repo)
+        self.assertEqual((c["install"], c["lint"], c["typecheck"], c["test"], c["build"]),
+                         ("uv sync", "uv run ruff check .", "uv run mypy .", "uv run pytest -q", ""))
+
+    def test_node_scripts_use_the_lockfiles_package_manager_and_skip_npms_default_test(self):
+        pkg = {"scripts": {"lint": "eslint .", "build": "vite build", "test": "echo \"Error: no test specified\" && exit 1"}}
+        repo, out = self.project({"package.json": json.dumps(pkg), "pnpm-lock.yaml": ""})
+        c = self.cmds(repo)
+        self.assertEqual((c["install"], c["lint"], c["build"], c["test"]),
+                         ("pnpm install --frozen-lockfile", "pnpm run lint", "pnpm run build", ""))
+        self.assertIn("no test command, so the gate will not require tests", out)
+
+    def test_makefile_targets_win_and_nothing_is_executed(self):
+        pkg = {"scripts": {"test": "touch RAN && jest"}}
+        repo, _ = self.project({"Makefile": "test:\n\ttouch RAN\nlint fmt:\n\ttrue\nX := 1\n",
+                                "package.json": json.dumps(pkg)})
+        c = self.cmds(repo)
+        self.assertEqual((c["test"], c["lint"]), ("make test", "make lint"))
+        self.assertFalse((repo / "RAN").exists())
+
+    def test_preset_commands_this_repo_cannot_run_are_replaced(self):
+        repo, out = self.project({"package.json": json.dumps({"scripts": {"test": "vitest run"}}),
+                                  "yarn.lock": ""}, "--preset", "example")
+        c = self.cmds(repo)
+        self.assertEqual((c["test"], c["lint"]), ("yarn run test", ""))  # example preset said make test / make lint
+        self.assertIn("replaced 'make test': no Makefile", out)
+
+    def test_reinstall_keeps_and_warns_about_a_users_broken_command_until_asked(self):
+        repo, _ = self.project({"package.json": json.dumps({"scripts": {"test": "vitest run"}})})
+        set_cfg(repo, commands__test="bash scripts/run-tests.sh")
+        r = run(["bash", str(HARNESS / "install.sh"), str(repo), "--force"], repo)
+        self.assertEqual(self.cmds(repo)["test"], "bash scripts/run-tests.sh")
+        r = run(["python3", ".claude/harness/scripts/detect-commands.py"], repo)
+        self.assertIn("WARNING: scripts/run-tests.sh does not exist", r.stdout)
+        run(["bash", str(HARNESS / "install.sh"), str(repo), "--detect-commands"], repo)
+        self.assertEqual(self.cmds(repo)["test"], "npm run test")
+
+    def test_explicit_command_wins_and_bad_keys_are_refused(self):
+        repo, _ = self.project({"pyproject.toml": "[project]\nname='x'\n[tool.pytest.ini_options]\n"},
+                               "--command", "test=python -m pytest -x")
+        self.assertEqual(self.cmds(repo)["test"], "python -m pytest -x")
+        r = run(["bash", str(HARNESS / "install.sh"), str(repo), "--command", "deploy=x"], repo, check=False)
+        self.assertNotEqual(r.returncode, 0)
+
+    def test_broken_command_rules(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("dc", HARNESS / "template/.claude/harness/scripts/detect-commands.py")
+        dc = importlib.util.module_from_spec(spec); spec.loader.exec_module(dc)
+        root = self.tmp
+        (root / "Makefile").write_text("test:\n\ttrue\n")
+        (root / "package.json").write_text(json.dumps({"scripts": {"lint": "eslint ."}}))
+        (root / "scripts").mkdir(); (root / "scripts/ok.sh").write_text("")
+        for cmd, bad in (("make test", False), ("make lint", True), ("pnpm run lint", False), ("npm run test", True),
+                         ("bash scripts/ok.sh test", False), ("bash scripts/nope.sh", True), ("./gradlew test", True),
+                         ("go test ./...", False), ("uv run pytest -q", False), ("pytest -q", False)):
+            self.assertEqual(dc.broken(root, cmd) is not None, bad, cmd)
+
+
 class TestLocalMode(Base):
     def setUp(self):
         super().setUp()

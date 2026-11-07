@@ -10,6 +10,9 @@
 #   --preset <name>                   merge presets/local/<name>.json (private, gitignored) or presets/<name>.json
 #                                     into harness.json once, recorded as "preset"; its _install options set
 #                                     defaults such as --no-release
+#   --command key=value               set a check command (install, lint, typecheck, test, stress, build); repeatable
+#   --detect-commands                 re-detect commands from the repo's files (fresh installs and newly applied
+#                                     presets always do); fills empty ones and replaces ones that cannot run
 #   --lead "Name <email>"             team lead (default: git user.name/user.email of whoever runs this)
 #   --collaborator "Name <email>"     add a collaborator (repeatable)
 #   --default-branch <name>           default: origin/HEAD, else current branch, else main
@@ -22,11 +25,13 @@ set -euo pipefail
 SRC="$(cd "$(dirname "$0")" && pwd)/template"
 target="${1:-}"; shift || true
 mode=""; rtype=""; branch=""; release=""; force=0; profile=""; lead=""; collabs=(); agents_md=1; preset=""
+commands=(); detect=0
 while [[ $# -gt 0 ]]; do case "$1" in
   --mode) mode="$2"; shift 2;;
   --release-type) rtype="$2"; shift 2;; --default-branch) branch="$2"; shift 2;;
   --profile) profile="$2"; shift 2;; --lead) lead="$2"; shift 2;; --preset) preset="$2"; shift 2;;
   --collaborator) collabs+=("$2"); shift 2;; --no-agents-md) agents_md=0; shift;;
+  --command) commands+=("--set" "$2"); shift 2;; --detect-commands) detect=1; shift;;
   --no-release) release=0; shift;; --with-release) release=1; shift;; --force) force=1; shift;;
   *) echo "unknown arg: $1" >&2; exit 3;; esac; done
 [[ -z "$mode" || "$mode" == tracked || "$mode" == local ]] || { echo "--mode must be tracked or local" >&2; exit 3; }
@@ -81,6 +86,12 @@ while IFS= read -r f; do
 done < <(find "$SRC" -type f ! -path "$SRC/release/*" ! -name '*.pyc' ! -name '.DS_Store' ! -path '*/__pycache__/*')
 chmod +x .claude/hooks/*.sh .claude/hooks/*.py .claude/harness/scripts/*
 
+# A preset applied by this run may name commands this repo lacks; those are replaced by detected ones.
+preset_new=0
+if [[ -n "$preset_file" ]]; then
+  had="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("preset",""))' .claude/harness/harness.json 2>/dev/null || true)"
+  [[ "$had" == "$preset" ]] || preset_new=1
+fi
 echo "harness.json"
 python3 - "$branch" "$profile" "$lead" "$mode" "$preset_file" "${collabs[@]+"${collabs[@]}"}" << 'PY'
 import json, re, sys
@@ -134,6 +145,12 @@ for s in collabs:
 open(p, "w").write(json.dumps(c, indent=2) + "\n")
 print("  " + (", ".join(changed) if changed else "unchanged"))
 PY
+
+if [[ $fresh -eq 1 || $preset_new -eq 1 || $detect -eq 1 || ${#commands[@]} -gt 0 ]]; then
+  echo "Check commands (from the repo's files; nothing is run)"
+  dargs=(--apply); [[ $fresh -eq 1 || $preset_new -eq 1 || $detect -eq 1 ]] && dargs+=(--replace-stale)
+  python3 .claude/harness/scripts/detect-commands.py "${dargs[@]}" "${commands[@]+"${commands[@]}"}"
+fi
 
 settings=".claude/settings.json"; [[ $mode == local ]] && settings=".claude/settings.local.json"
 echo "Claude settings (merge into $settings)"
@@ -264,8 +281,8 @@ if [[ -n "$preset_file" ]]; then
   done < <(python3 -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1])).get("_install",{}).get("expects",[])))' "$preset_file")
 fi
 echo "Next:"
-echo "  1. Fill .claude/harness/harness.json \"commands\" (lint, typecheck, test, stress, build) and gate.critical_paths;"
-echo "     check \"team\" and \"profile\" (strict | standard | light | guided)."
+echo "  1. Run each check command once (python3 .claude/harness/scripts/detect-commands.py lists them) and fix"
+echo "     any in .claude/harness/harness.json; check gate.critical_paths, \"team\" and \"profile\"."
 if [[ $mode == tracked ]]; then
   echo "  2. Review and commit the harness files yourself (worktrees only see committed files), then push:"
   echo "       git add .claude .githooks CLAUDE.md AGENTS.md .gitignore release-please-config.json .release-please-manifest.json .github"

@@ -161,11 +161,26 @@ git clone <this repo> ~/dev/harness
 ~/dev/harness/uninstall.sh /path/to/client-repo                               # remove it again
 ```
 
-Options: `--mode`, `--profile`, `--lead`, `--collaborator`, `--default-branch`, `--release-type`, `--no-release`,
-`--with-release`, `--no-agents-md` and `--force`. On a re-install, `harness.json` changes only for the flags you pass.
+Options: `--mode`, `--profile`, `--preset`, `--command key=value`, `--detect-commands`, `--lead`, `--collaborator`,
+`--default-branch`, `--release-type`, `--no-release`, `--with-release`, `--no-agents-md` and `--force`.
+On a re-install, `harness.json` changes only for the flags you pass.
+
+**Check commands are detected, never run.** On a fresh install (and when a preset is applied) the installer reads
+the repo's files and fills `commands`:
+- **Make:** targets come first.
+- **Node:** `package.json` scripts, run with the lockfile's package manager (npm, pnpm, yarn or bun).
+- **Python:** uv, poetry or pdm, with ruff/flake8, mypy/pyright and pytest.
+- **Go and Rust:** their standard commands.
+
+A command that cannot run here (its script, make target or package.json script is missing) is replaced when a
+preset set it, and only reported when you set it yourself. Re-check at any time with
+`python3 .claude/harness/scripts/detect-commands.py`, re-detect with `install.sh <repo> --detect-commands`, or
+set one with `--command test='pytest -q'`.
+
+An empty `test` command means the gate does not require tests, and the installer says so.
 
 Then:
-1. Fill in the `commands` in `harness.json` (`lint`, `typecheck`, `test`, `stress`, `build`) and `gate.critical_paths`. Check `team` and `profile`.
+1. Run each check command once, and fix any that are wrong in `harness.json`. Check `gate.critical_paths`, `team` and `profile`.
 2. Review the harness files, commit them, and push. Worktrees only see committed files.
 3. On GitHub, go to Settings → Actions → General and allow Actions to create pull requests. Prefer squash merges.
 4. The release workflows ship pinned to reviewed commit SHAs; review any bump before you merge it.
