@@ -89,6 +89,15 @@ class TestInstall(Base):
         self.assertFalse(list(repo.rglob("__pycache__")))
         self.assertNotIn("Temesgen", "".join(p.read_text() for p in (repo / ".claude").rglob("*") if p.is_file()))
 
+    def test_pr_template_fallback_is_installed_and_used_by_wf_pr(self):
+        repo = make_repo(self.tmp, "p")
+        tpl = (repo / ".claude/harness/templates/pull-request.md").read_text()
+        for s in ("## What", "## Why", "## How", "## Testing", "## Screenshots", "## Risk and rollback",
+                  "No secrets, credentials", "synthetic data"):
+            self.assertIn(s, tpl)
+        self.assertIn(".claude/harness/templates/pull-request.md",
+                      (repo / ".claude/skills/wf-pr/SKILL.md").read_text())
+
     def test_reinstall_keeps_branch_and_config(self):
         repo = make_repo(self.tmp, "p", "--default-branch", "develop")
         set_cfg(repo, profile="strict")
@@ -550,7 +559,8 @@ class TestPreset(Base):
         repo = make_repo(self.tmp, "proj", "--preset", "example")
         self.assertFalse((repo / "release-please-config.json").exists())
         cfg = json.loads(run(["python3", ".claude/harness/scripts/hconfig.py"], repo).stdout)
-        self.assertEqual((cfg["commands"]["test"], cfg["profile"]), ("make test", "guided"))
+        # the preset says "make test", which this empty repo (no Makefile) cannot run, so it is dropped
+        self.assertEqual((cfg["commands"]["test"], cfg["profile"]), ("", "guided"))
         self.assertEqual(cfg["docs"]["adr_dir"], "docs/adr")
         commit_all(repo)
         run(["git", "branch", "dev"], repo)
@@ -629,6 +639,12 @@ class TestGuidedProfile(Base):
                          ("guided", "warn", ["secrets"]))
         self.assertTrue(cfg["validation"]["required"])
 
+    def test_banner_says_warn_not_the_underlying_decisions(self):
+        out = run([str(self.repo / ".claude/hooks/session-context.sh")], self.repo).stdout
+        banner = [l for l in out.splitlines() if l.startswith("[harness] maintainers")][0]
+        self.assertIn("git guard warn (git ops warn with a reminder; enforced: secrets)", banner)
+        self.assertNotIn("push: block", banner)
+
     def test_git_operations_warn_with_a_reminder(self):
         for cmd, note in (("git push origin feature/x", "Push is the user's"), ("gh pr merge 3", "Merging is the user's"),
                           ("git commit -m 'feat: x'", "no Co-Authored-By"), ("git commit --no-verify -m x", "Never bypass hooks")):
@@ -657,6 +673,198 @@ class TestGuidedProfile(Base):
         self.assertEqual(guard(self.repo, "git commit -m 'feat: config'"), "warn")
 
 
+class TestCommands(Base):
+    def project(self, files: dict, *install_args):
+        repo = self.tmp / "app"
+        repo.mkdir()
+        run(["git", "init", "-q", "-b", "main"], repo)
+        for name, body in files.items():
+            (repo / name).parent.mkdir(parents=True, exist_ok=True)
+            (repo / name).write_text(body)
+        run(["git", "add", "-A"], repo)
+        run(["git", "-c", "core.hooksPath=/dev/null", "commit", "-q", "-m", "chore: init"], repo)
+        r = run(["bash", str(HARNESS / "install.sh"), str(repo), *install_args], repo)
+        return repo, r.stdout
+
+    def cmds(self, repo):
+        return json.loads((repo / ".claude/harness/harness.json").read_text())["commands"]
+
+    def test_python_project_with_uv_ruff_mypy_pytest(self):
+        repo, _ = self.project({"pyproject.toml": "[project]\nname='x'\ndependencies=['pytest']\n[tool.ruff]\n"
+                                                  "line-length=100\n[tool.mypy]\nstrict=true\n", "uv.lock": ""})
+        c = self.cmds(repo)
+        self.assertEqual((c["install"], c["lint"], c["typecheck"], c["test"], c["build"]),
+                         ("uv sync", "uv run ruff check .", "uv run mypy .", "uv run pytest -q", ""))
+
+    def test_node_scripts_use_the_lockfiles_package_manager_and_skip_npms_default_test(self):
+        pkg = {"scripts": {"lint": "eslint .", "build": "vite build", "test": "echo \"Error: no test specified\" && exit 1"}}
+        repo, out = self.project({"package.json": json.dumps(pkg), "pnpm-lock.yaml": ""})
+        c = self.cmds(repo)
+        self.assertEqual((c["install"], c["lint"], c["build"], c["test"]),
+                         ("pnpm install --frozen-lockfile", "pnpm run lint", "pnpm run build", ""))
+        self.assertIn("no test command, so the gate will not require tests", out)
+
+    def test_makefile_targets_win_and_nothing_is_executed(self):
+        pkg = {"scripts": {"test": "touch RAN && jest"}}
+        repo, _ = self.project({"Makefile": "test:\n\ttouch RAN\nlint fmt:\n\ttrue\nX := 1\n",
+                                "package.json": json.dumps(pkg)})
+        c = self.cmds(repo)
+        self.assertEqual((c["test"], c["lint"]), ("make test", "make lint"))
+        self.assertFalse((repo / "RAN").exists())
+
+    def test_preset_commands_this_repo_cannot_run_are_replaced(self):
+        repo, out = self.project({"package.json": json.dumps({"scripts": {"test": "vitest run"}}),
+                                  "yarn.lock": ""}, "--preset", "example")
+        c = self.cmds(repo)
+        self.assertEqual((c["test"], c["lint"]), ("yarn run test", ""))  # example preset said make test / make lint
+        self.assertIn("replaced the preset's 'make test': no Makefile", out)
+
+    def test_reinstall_keeps_and_warns_about_a_users_broken_command_until_asked(self):
+        repo, _ = self.project({"package.json": json.dumps({"scripts": {"test": "vitest run"}})})
+        set_cfg(repo, commands__test="bash scripts/run-tests.sh")
+        r = run(["bash", str(HARNESS / "install.sh"), str(repo), "--force"], repo)
+        self.assertEqual(self.cmds(repo)["test"], "bash scripts/run-tests.sh")
+        r = run(["python3", ".claude/harness/scripts/detect-commands.py"], repo)
+        self.assertIn("WARNING: scripts/run-tests.sh does not exist", r.stdout)
+        run(["bash", str(HARNESS / "install.sh"), str(repo), "--detect-commands"], repo)
+        self.assertEqual(self.cmds(repo)["test"], "npm run test")
+
+    def test_a_new_preset_replaces_only_its_own_commands(self):
+        local = HARNESS / "presets/local"
+        made = not local.exists()
+        local.mkdir(exist_ok=True)
+        f = local / "zz-test-only-test.json"
+        self.assertFalse(f.exists())
+        try:
+            f.write_text(json.dumps({"commands": {"test": "make test"}}))
+            repo, _ = self.project({"package.json": json.dumps({"scripts": {"test": "vitest run", "lint": "eslint ."}})})
+            set_cfg(repo, commands__lint="bash -c 'cd web && ./lint.sh'", commands__build="bash scripts/build.sh")
+            r = run(["bash", str(HARNESS / "install.sh"), str(repo), "--preset", "zz-test-only-test"], repo)
+            c = self.cmds(repo)
+            self.assertEqual(c["test"], "npm run test")                       # the preset's, replaced
+            self.assertEqual(c["lint"], "bash -c 'cd web && ./lint.sh'")       # the user's, untouched
+            self.assertEqual(c["build"], "bash scripts/build.sh")              # the user's, broken: kept + warned
+            self.assertIn("WARNING: scripts/build.sh does not exist; kept", r.stdout)
+        finally:
+            f.unlink()
+            if made:
+                local.rmdir()
+
+    def test_detect_commands_never_clears_a_command(self):
+        repo, _ = self.project({"README.md": "x"})
+        set_cfg(repo, commands__test="bash scripts/run-tests.sh")
+        r = run(["bash", str(HARNESS / "install.sh"), str(repo), "--detect-commands"], repo)
+        self.assertEqual(self.cmds(repo)["test"], "bash scripts/run-tests.sh")
+        self.assertIn("kept, fix it in harness.json", r.stdout)
+
+    def test_explicit_command_wins_and_bad_keys_are_refused(self):
+        repo, _ = self.project({"pyproject.toml": "[project]\nname='x'\n[tool.pytest.ini_options]\n"},
+                               "--command", "test=python -m pytest -x")
+        self.assertEqual(self.cmds(repo)["test"], "python -m pytest -x")
+        r = run(["bash", str(HARNESS / "install.sh"), str(repo), "--command", "deploy=x"], repo, check=False)
+        self.assertNotEqual(r.returncode, 0)
+
+    def test_broken_command_rules(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("dc", HARNESS / "template/.claude/harness/scripts/detect-commands.py")
+        dc = importlib.util.module_from_spec(spec); spec.loader.exec_module(dc)
+        root = self.tmp
+        (root / "Makefile").write_text("test:\n\ttrue\n")
+        (root / "package.json").write_text(json.dumps({"scripts": {"lint": "eslint ."}}))
+        (root / "scripts").mkdir(); (root / "scripts/ok.sh").write_text("")
+        (root / "sub").mkdir(); (root / "sub/Makefile").write_text("test:\n\ttrue\n")
+        (root / "ci.mk").write_text("check:\n\ttrue\n")
+        for cmd, bad in (("make test", False), ("make lint", True), ("pnpm run lint", False), ("npm run test", True),
+                         ("bash scripts/ok.sh test", False), ("bash scripts/nope.sh", True), ("./gradlew test", True),
+                         ("go test ./...", False), ("uv run pytest -q", False), ("pytest -q", False),
+                         ("make -C sub test", False), ("make -C sub lint", True), ("make -Csub test", False),
+                         ("make -f ci.mk check", False), ("make -j 4 test", False), ("make -C nowhere test", True),
+                         ("bash -c 'cd a && ./x.sh'", False), ("python -c 'print(1/2)'", False),
+                         ("npm run --silent lint", False), ("cd web && npm test", False), ("make $(T)", False),
+                         ("~/no/such/script.sh", True)):
+            self.assertEqual(dc.broken(root, cmd) is not None, bad, cmd)
+
+    def test_make_follows_includes_and_reads_only_the_makefile_make_uses(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("dc", HARNESS / "template/.claude/harness/scripts/detect-commands.py")
+        dc = importlib.util.module_from_spec(spec); spec.loader.exec_module(dc)
+        root = self.tmp
+        (root / "Makefile").write_text("include common.mk\nlint:\n\ttrue\n")
+        (root / "common.mk").write_text("test:\n\ttrue\n")
+        self.assertIsNone(dc.broken(root, "make test"))                 # defined in an included file
+        (root / "Makefile").write_text("-include $(ENV).mk\nlint:\n\ttrue\n")
+        self.assertIsNone(dc.broken(root, "make test"))                 # unknowable include: not called broken
+        (root / "Makefile").write_text("test:\n\ttrue\n")
+        (root / "GNUmakefile").write_text("lint:\n\ttrue\n")         # make reads this one, not Makefile
+        self.assertIsNotNone(dc.broken(root, "make test"))
+        self.assertEqual(dc.detect(root).get("test"), None)
+
+
+class TestLocalAgentsMd(Base):
+    def repo_with(self, agents=None, tracked=False, *args):
+        repo = self.tmp / "p"
+        repo.mkdir()
+        run(["git", "init", "-q", "-b", "main"], repo)
+        if agents is not None:
+            (repo / "AGENTS.md").write_text(agents)
+        if tracked:
+            run(["git", "add", "AGENTS.md"], repo)
+        run(["git", "-c", "core.hooksPath=/dev/null", "commit", "-q", "--allow-empty", "-m", "chore: init"], repo)
+        r = run(["bash", str(HARNESS / "install.sh"), str(repo), "--mode", "local", *args], repo)
+        return repo, r.stdout
+
+    def status(self, repo):
+        return run(["git", "status", "--porcelain", "--untracked-files=all"], repo).stdout
+
+    def test_created_for_other_agents_kept_out_of_git_and_removed_on_uninstall(self):
+        repo, _ = self.repo_with()
+        self.assertIn("Never claim a check passed", (repo / "AGENTS.md").read_text())
+        self.assertEqual(json.loads((repo / ".claude/harness/harness.json").read_text())["agents_md"], "local")
+        self.assertEqual(self.status(repo), "")
+        run(["bash", str(HARNESS / "install.sh"), str(repo), "--no-agents-md"], repo)  # reinstall keeps it excluded
+        self.assertEqual(self.status(repo), "")
+        run(["bash", str(HARNESS / "uninstall.sh"), str(repo)], repo)
+        self.assertFalse((repo / "AGENTS.md").exists())
+        self.assertEqual(self.status(repo), "")
+
+    def test_a_users_file_put_in_place_of_ours_is_not_hidden_or_removed(self):
+        repo, _ = self.repo_with()
+        (repo / "AGENTS.md").write_text("my own rules\n")
+        r = run(["bash", str(HARNESS / "install.sh"), str(repo)], repo)
+        self.assertIn("of your own exists; left alone", r.stdout)
+        self.assertEqual(self.status(repo), "?? AGENTS.md\n")       # visible to git again, so it can be committed
+        run(["bash", str(HARNESS / "uninstall.sh"), str(repo)], repo)
+        self.assertEqual((repo / "AGENTS.md").read_text(), "my own rules\n")
+
+    def test_a_tracked_agents_md_is_never_touched(self):
+        body = "# Agents\n\nProject rules.\n"
+        repo, out = self.repo_with(body, True)
+        self.assertEqual((repo / "AGENTS.md").read_text(), body)
+        self.assertIn("AGENTS.md is tracked, so it is left alone", out)
+        self.assertNotIn("agents_md", json.loads((repo / ".claude/harness/harness.json").read_text()))
+        run(["bash", str(HARNESS / "uninstall.sh"), str(repo)], repo)
+        self.assertEqual((repo / "AGENTS.md").read_text(), body)
+        self.assertEqual(self.status(repo), "")
+
+    def test_an_untracked_agents_md_of_the_users_is_left_alone(self):
+        repo, out = self.repo_with("my notes\n")
+        self.assertEqual((repo / "AGENTS.md").read_text(), "my notes\n")
+        self.assertIn("of your own exists; left alone", out)
+        run(["bash", str(HARNESS / "uninstall.sh"), str(repo)], repo)
+        self.assertEqual((repo / "AGENTS.md").read_text(), "my notes\n")
+
+    def test_no_agents_md_flag_and_worktrees(self):
+        repo, _ = self.repo_with(None, False, "--no-agents-md")
+        self.assertFalse((repo / "AGENTS.md").exists())
+        shutil.rmtree(repo)
+        repo, _ = self.repo_with()
+        r = run([".claude/harness/scripts/wf-new.sh", "demo", "try it"], repo, check=False)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        wt = self.tmp / "p.worktrees/demo"
+        self.assertIn("<!-- harness:begin -->", (wt / "AGENTS.md").read_text())
+        self.assertEqual(self.status(wt), "")
+
+
 class TestLocalMode(Base):
     def setUp(self):
         super().setUp()
@@ -670,8 +878,9 @@ class TestLocalMode(Base):
 
     def test_install_leaves_no_trace(self):
         self.assertEqual(self.status(), "")
-        for f in ("CLAUDE.md", "AGENTS.md", ".gitignore", ".githooks", "release-please-config.json"):
+        for f in ("CLAUDE.md", ".gitignore", ".githooks", "release-please-config.json"):
             self.assertFalse((self.repo / f).exists(), f)
+        self.assertIn("<!-- harness:begin -->", (self.repo / "AGENTS.md").read_text())  # for other agents, excluded
         s = json.loads((self.repo / ".claude/settings.local.json").read_text())
         self.assertIn("PreToolUse", s["hooks"])
         self.assertTrue(os.access(self.gitdir / "hooks/commit-msg", os.X_OK))
@@ -829,6 +1038,31 @@ class TestSync(Base):
         self.assertEqual([p.wait() for p in procs], [0] * 12)
         set_cfg(self.repo, sync={"max_entries": 50, "max_chars": 10000})
         self.assertEqual(sum("DONE task" in l for l in self.inbox(b).splitlines()), 12)
+
+    def test_sync_dir_shares_one_board_between_separate_repos(self):
+        shared = self.tmp / "shared-board"
+        other = make_repo(self.tmp, "q", "--mode", "local")
+        for repo in (self.repo, other):
+            set_cfg(repo, sync={"dir": str(shared)})
+        b = self.fork()["session_id"]                                   # forked from repo p
+        run(["python3", ".claude/harness/scripts/wf-sync.py", "--session", b, "post", "NEW", "button ready"], other)
+        self.assertIn("frontend] NEW button ready", self.inbox(self.A))  # read back in repo p
+        self.assertTrue((shared / "boards/invoices.jsonl").exists())
+        self.assertFalse(list(self.tmp.glob("*/.git/harness-sync")))
+
+    def test_purge_leaves_a_shared_sync_dir_alone(self):
+        shared = self.tmp / "shared-board"
+        set_cfg(self.repo, sync={"dir": str(shared)})
+        self.fork()
+        r = run(["bash", str(HARNESS / "uninstall.sh"), str(self.repo), "--purge-work"], self.repo)
+        self.assertTrue((shared / "members.json").exists())
+        self.assertIn(f"sync.dir {shared} is shared with other repos, so it was not touched", r.stdout)
+
+    def test_relative_sync_dir_is_refused(self):
+        set_cfg(self.repo, sync={"dir": "boards"})
+        r = self.sync(self.A, "join", "x", "y", check=False)
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("must be an absolute path", r.stderr)
 
     def test_install_wires_the_hook_and_uninstall_removes_it(self):
         s = json.loads((self.repo / ".claude/settings.local.json").read_text())

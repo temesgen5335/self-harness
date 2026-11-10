@@ -43,7 +43,7 @@ How strict the harness is (git policy and gate) is project config, from `strict`
 | `.claude/agents/` | The `wf-researcher`, `wf-lens-reviewer` and `wf-adversary` subagents. |
 | `.claude/hooks/` | `guard-git.sh` + `guard_git.py` (git policy for each operation) `session-context.sh` (banner for each new session) and `sync-context.sh` (unread sync-board posts at each prompt). |
 | `.claude/settings.json` | Attribution off and hook wiring, merged into your existing settings. |
-| `AGENTS.md` (managed block) | The same core rules for other coding agents, between `<!-- harness:begin/end -->` markers. |
+| `AGENTS.md` (managed block) | The same core rules for other coding agents (Codex, Cursor, …), between `<!-- harness:begin/end -->` markers. Their hooks and skills are Claude Code only. |
 | `.githooks/commit-msg` | Enforces Conventional Commits and rejects AI attribution. |
 | `release-please-config.json`, manifest, `.github/workflows/` | Versioned releases, plus a PR-title lint for squash merges. |
 | `.work/<slug>/` | Per work item: brief, investigation, spec, build log, reviews, gate, waivers. Committed with the branch. |
@@ -105,7 +105,8 @@ Pick one at the first install with `--mode`. To switch later, run `uninstall.sh`
 | | `--mode tracked` (default) | `--mode local` (no trace in git) |
 |---|---|---|
 | Harness files | committed with the project | hidden via `.git/info/exclude`, so no tracked file (not even `.gitignore`) changes |
-| Rules | `@import` in `CLAUDE.md` + managed block in `AGENTS.md` | injected by the SessionStart hook; `CLAUDE.md` and `AGENTS.md` untouched |
+| Rules for Claude | `@import` in `CLAUDE.md` | injected by the SessionStart hook; `CLAUDE.md` untouched |
+| Rules for other agents (Codex, Cursor, …) | managed block in `AGENTS.md` | an `AGENTS.md` created only when the repo has none, hidden via `.git/info/exclude`; a tracked or personal `AGENTS.md` is left alone (`--no-agents-md` skips it) |
 | Settings | merged into `.claude/settings.json` | merged into `.claude/settings.local.json` |
 | commit-msg hook | `.githooks/` + `core.hooksPath` | `<git-dir>/hooks/commit-msg`, shared by all worktrees |
 | `.work/` artifacts | committed on each feature branch | symlink to `<git-dir>/harness-work/`, shared by all worktrees, never pushed |
@@ -161,11 +162,26 @@ git clone <this repo> ~/dev/harness
 ~/dev/harness/uninstall.sh /path/to/client-repo                               # remove it again
 ```
 
-Options: `--mode`, `--profile`, `--lead`, `--collaborator`, `--default-branch`, `--release-type`, `--no-release`,
-`--with-release`, `--no-agents-md` and `--force`. On a re-install, `harness.json` changes only for the flags you pass.
+Options: `--mode`, `--profile`, `--preset`, `--command key=value`, `--detect-commands`, `--lead`, `--collaborator`,
+`--default-branch`, `--release-type`, `--no-release`, `--with-release`, `--no-agents-md` and `--force`.
+On a re-install, `harness.json` changes only for the flags you pass.
+
+**Check commands are detected, never run.** On a fresh install (and when a preset is applied) the installer reads
+the repo's files and fills `commands`:
+- **Make:** targets come first.
+- **Node:** `package.json` scripts, run with the lockfile's package manager (npm, pnpm, yarn or bun).
+- **Python:** uv, poetry or pdm, with ruff/flake8, mypy/pyright and pytest.
+- **Go and Rust:** their standard commands.
+
+A command that cannot run here (its script, make target or package.json script is missing) is replaced when a
+preset set it, and only reported when you set it yourself. Re-check at any time with
+`python3 .claude/harness/scripts/detect-commands.py`, re-detect with `install.sh <repo> --detect-commands`, or
+set one with `--command test='pytest -q'`.
+
+An empty `test` command means the gate does not require tests, and the installer says so.
 
 Then:
-1. Fill in the `commands` in `harness.json` (`lint`, `typecheck`, `test`, `stress`, `build`) and `gate.critical_paths`. Check `team` and `profile`.
+1. Run each check command once, and fix any that are wrong in `harness.json`. Check `gate.critical_paths`, `team` and `profile`.
 2. Review the harness files, commit them, and push. Worktrees only see committed files.
 3. On GitHub, go to Settings → Actions → General and allow Actions to create pull requests. Prefer squash merges.
 4. The release workflows ship pinned to reviewed commit SHAs; review any bump before you merge it.
@@ -250,7 +266,7 @@ so the builder's reasoning doesn't bias it. The builder answers each finding in 
 - **Fork** (`/wf-handoff --fork frontend "Build the export button" --as backend`): a parallel session with its own
   goal, like a second pair of hands. Give it its own worktree with `wf-new.sh`.
 
-Both write a handoff file in `<git-common-dir>/harness-sync/handoffs/` (shared by worktrees, never committed).
+Both write a handoff file in `<git-common-dir>/harness-sync/handoffs/`, or under `sync.dir` when set (shared by worktrees, never committed).
 The script fills in the facts: the old session's transcript path, branch, HEAD, upstream and uncommitted files.
 Claude fills in the rest:
 - the goal;
@@ -279,6 +295,9 @@ the board in advance, so the new session is a member from its first prompt.
   sessions, once, at its next prompt. Most prompts add nothing.
 - **Cap:** a burst is capped at `sync.max_entries` (20) / `sync.max_chars` (2000), keeping the newest, with a
   pointer to `wf-sync.py show <board>` for the rest.
+- **Across repos:** boards live in the git dir, shared by worktrees. To share one board between separate repos
+  (a frontend repo and a backend repo), set `sync.dir` to the same absolute path in each, for example in a
+  private preset.
 - **Trust:** entries are treated as data: the receiving session checks the ref before relying on one, and asks you when one
   conflicts with your instructions.
 

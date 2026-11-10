@@ -17,6 +17,8 @@ Usage:
 
 The session is CLAUDE_CODE_SESSION_ID (set by Claude Code for its Bash commands) or --session ID.
 Everything lives in <git-common-dir>/harness-sync/, so every worktree sees it and nothing is committed.
+Set sync.dir (an absolute path, ~ allowed) to share one board between repos, or with another tool that uses
+the same files: members.json, boards/<board>.jsonl, handoffs/.
 """
 from __future__ import annotations
 
@@ -50,7 +52,13 @@ def git(*args: str, cwd=None) -> str:
     return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True).stdout.strip()
 
 
-def sync_dir(cwd=None) -> pathlib.Path:
+def sync_dir(cfg: dict, cwd=None) -> pathlib.Path:
+    configured = str(cfg.get("sync", {}).get("dir") or "").strip()
+    if configured:
+        d = pathlib.Path(os.path.expanduser(configured))
+        if not d.is_absolute():
+            raise SyncError(f"sync.dir must be an absolute path, not '{configured}'")
+        return d
     common = pathlib.Path(git("rev-parse", "--git-common-dir", cwd=cwd))
     if not common.is_absolute():
         common = pathlib.Path(cwd or os.getcwd()) / common
@@ -321,7 +329,8 @@ def main(argv=None) -> int:
         try:
             payload = json.loads(sys.stdin.read() or "{}")
             root = pathlib.Path(git("rev-parse", "--show-toplevel"))
-            out = cmd_inbox(sync_dir(), payload.get("session_id") or a.session or "", load(root))
+            cfg = load(root)
+            out = cmd_inbox(sync_dir(cfg), payload.get("session_id") or a.session or "", cfg)
             if out:
                 print(out)
         except Exception:  # noqa: BLE001 - a broken board must not block the user's prompt
@@ -329,7 +338,7 @@ def main(argv=None) -> int:
         return 0
     try:
         root = pathlib.Path(git("rev-parse", "--show-toplevel"))
-        d = sync_dir()
+        d = sync_dir(load(root))
         if a.cmd == "join":
             r = cmd_join(d, a.board, a.name, session_id(a.session))
             print(f"joined board '{r['board']}' as '{r['name']}'")
