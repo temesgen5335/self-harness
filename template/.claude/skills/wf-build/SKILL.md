@@ -27,6 +27,8 @@ Tree: !`git status --short | head -20`
 5. Run every configured check (lint, typecheck, test, build). Paste each command and its one-line result.
 6. Self-check against `.claude/harness/RUBRIC.md` for the touched code; fix what you find.
 7. Append a build-log entry, set the task row to `done`, `wf-state.py <slug> set phase=building`.
+   If this session is on a sync board (`wf-sync.py whoami`) and another session depends on this task or a shared
+   interface changed, post `DONE` / `CHANGED` with the commit as `--ref` (`/wf-sync`).
 8. Draft commits by following `/wf-commit` (draft only). Then STOP. Do not start the next task unless told "continue".
 
 ## If the spec is wrong or incomplete

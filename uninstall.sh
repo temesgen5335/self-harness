@@ -3,7 +3,7 @@
 # Usage: uninstall.sh <target-repo> [--purge-work]
 #   local mode  : removes every harness path, the .git/info/exclude block, the harness hooks from
 #                 settings.local.json, and the commit-msg hook if it is ours. Work artifacts in the git dir
-#                 (<git-common-dir>/harness-work) are kept unless --purge-work. Leaves git status unchanged.
+#                 (<git-common-dir>/harness-work, harness-sync) are kept unless --purge-work. Leaves git status unchanged.
 #   tracked mode: prints what to delete; the removal is a normal change you review and commit yourself.
 set -euo pipefail
 target="${1:-}"; shift || true
@@ -19,7 +19,8 @@ if [[ $mode == tracked ]]; then
   cat << MSG
 Tracked mode: the harness is part of the repo history, so remove it as a reviewed change:
   git rm -r .claude/harness .claude/skills/wf-* .claude/agents/wf-*.md .claude/hooks/guard-git.sh \\
-            .claude/hooks/guard_git.py .claude/hooks/session-context.sh .githooks/commit-msg
+            .claude/hooks/guard_git.py .claude/hooks/session-context.sh \\
+            .claude/hooks/sync-context.sh .githooks/commit-msg
   then remove the '@.claude/harness/RULES.md' import from CLAUDE.md, the harness block from AGENTS.md,
   the harness hooks from .claude/settings.json, and run: git config --unset core.hooksPath
   (.work/ and release-please files are yours to keep or delete.)
@@ -35,7 +36,7 @@ import json, os
 p = ".claude/settings.local.json"
 if os.path.exists(p):
     s = json.load(open(p))
-    ours = (".claude/hooks/guard-git.sh", ".claude/hooks/session-context.sh")
+    ours = (".claude/hooks/guard-git.sh", ".claude/hooks/session-context.sh", ".claude/hooks/sync-context.sh")
     for event, entries in list(s.get("hooks", {}).items()):
         keep = [e for e in entries if not any(any(o in h.get("command", "") for o in ours) for h in e.get("hooks", []))]
         if keep: s["hooks"][event] = keep
@@ -65,7 +66,7 @@ while IFS= read -r entry; do
 done <<< "$paths"
 rmdir .claude/hooks .claude/skills .claude/agents .claude 2>/dev/null || true
 
-if [[ $purge -eq 1 ]]; then rm -rf "$common/harness-work"; echo "  purged $common/harness-work"
-else echo "  kept work artifacts in $common/harness-work (use --purge-work to delete)"; fi
+if [[ $purge -eq 1 ]]; then rm -rf "$common/harness-work" "$common/harness-sync"; echo "  purged $common/harness-work and harness-sync"
+else echo "  kept work artifacts in $common/harness-work and handoffs/sync boards in harness-sync (use --purge-work to delete)"; fi
 echo "Worktrees made by wf-new.sh still hold a copy: run uninstall.sh in each, or remove those worktrees."
 [[ -z "$(git status --porcelain)" ]] && echo "git status: clean" || git status --short
